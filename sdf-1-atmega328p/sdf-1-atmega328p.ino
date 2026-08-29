@@ -1,14 +1,38 @@
-/*********************************************
- * Proyecto: MSX-SDF-1                       *
- * Autor: Carlos Escobar                     *
- * Abr-2023                                  *
- *********************************************/
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Proyecto: MSX-SDF-1                                                       *
+ * Autor: Carlos Escobar                                                     *
+ * Abr-2023                                                                  *
+ * Board ATmega328 20mhz  (el cristal es de 20 MHz; el BOM v1.1 esta mal,    *
+ *                         ver hardware/rev1/BODGES.md paso 7)               *
+ * Additional Boards Manager:                                                *
+ *  https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json   *
+ *  Tools->MiniCore->ATmega328                                               *
+ * Libraries:                                                                *
+ *  Adafruit SH1106                                                          *
+ *  SdFat - Adafruit Fork: https://github.com/adafruit/SdFat                 *
+ *   (NO la de greiman: el sketch usa SPI_FULL_SPEED y el typedef File)      *
+ *                                                                           *
+ * Las interrupciones son PCINT nativo, sin libreria. Antes se usaba         *
+ * YetAnotherArduinoPcIntLibrary; ya no hace falta instalarla.               *
+ *                                                                           *
+ * Sin el IDE, desde la raiz del repo:  make firmware                        *
+ * El FQBN con el reloj fijo esta en el Makefile.                            *
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
-#include <SdFat.h>
 #include "defs.h"
-#include <YetAnotherPcInt.h>
+//#include <U8x8lib.h>
+#include <SdFat.h>
+#include <util/delay.h>
+
+#define SCREEN_WIDTH 128 // Ancho del display OLED
+#define SCREEN_HEIGHT 64 // Alto del display OLED
+#define i2c_Address 0x3c //initialize with the I2C addr 0x3C Typically eBay OLED's
+#define OLED_RESET -1   //   QT-PY / XIAO
+
+//U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 
 SdFat SD;
+char curFile[14];
 File dsk;
 volatile bool _debug = false;
 volatile uint8_t _stat=0;
@@ -27,12 +51,14 @@ volatile uint16_t _sector;
 volatile uint16_t _address;
 volatile uint32_t _sector_pos;
 volatile uint16_t _idx_sec=0;
+volatile byte _disk_number = 0;
 
 String diskFile(uint8_t drive)
 {
   //Por ahora solo se acceden a dos archivos DSK para prueba de concepto
   if (drive == 0)
     return "4K720.DSK";
+    //return curFile;
   else
     return "TPASCAL.DSK";
 }
@@ -53,10 +79,10 @@ void listFiles()
 }
 
 // Inicialmente se usaron los pines 0-1 del puerto B para los bits 0-1 del bus de datos
-// y los pines 2-7 del puerto D para los bits 2-7 con el objetivo de lierar los pines
+// y los pines 2-7 del puerto D para los bits 2-7 con el objetivo de liberar los pines
 // 0 y 1 del puerto D que corresponden a RX y TX, permitiendo hacer debug.
 // Ya no es necesario, por eso ahora se usa el puerto D completo para el bus de datos
-// facilitando la lectura y escritura de los datos en menos instrucciones.
+// facilitando la lectura y escritura de los datos con menos instrucciones.
 // Igualmente dejo comentado el codigo original por si fuese necesario usar el puerto
 // serie en el futuro.
 
@@ -207,14 +233,13 @@ inline void processData(register uint8_t data)
           //Serial.println("     sector="+String(_sector)+ "["+ hexByte(_sec_H)+ hexByte(_sec_L) +"] total="+ String(_total)+ " cmd="+hexByte(_cmd));
           //Serial.println("     address="+String(_address)+ "["+ hexByte(_addr_H)+ hexByte(_addr_L) +"] sector pos="+String(_sector_pos));
 
-          /*
-          if (_drive_number != _last_drv)
-          {
-            _last_drv = _drive_number;
-            dsk.close();
-            dsk = SD.open(diskFile(_drive_number), O_RDWR);
-          }
-          */
+          //if (_drive_number != _last_drv)
+          //{
+          //  _last_drv = _drive_number;
+          //  dsk.close();
+          //  dsk = SD.open(diskFile(_drive_number), O_RDWR);
+          //}
+          
 
           if ( _cmd == CMD_READ )
           {
@@ -290,107 +315,177 @@ inline uint8_t dataToSend()
         }
         return b;
       }
-      /*
-      else if ( _cmd_st == CMD_ST__READ_CRC )
-      {
-        if ( _total == 0)
-        {
-          _cmd = 0;
-          _cmd_st = 0;
-        }
-        else
-        {
-          _cmd_st = CMD_ST__READING_SEC;
-        }
-        return _crc;
-      }
-      */
+      //else if ( _cmd_st == CMD_ST__READ_CRC )
+      //{
+      //  if ( _total == 0)
+      //  {
+      //    _cmd = 0;
+      //    _cmd_st = 0;
+      //  }
+      //  else
+      //  {
+      //    _cmd_st = CMD_ST__READING_SEC;
+      //  }
+      //  return _crc;
+      //}
   }
   return 0;
 }
 
-//volatile int zz=0;
-void pinChanged_sd(const char* message, bool pinstate)
+// MSX_CS_PIN es PC0, o sea PCINT8, que pertenece al grupo PCINT1 (puerto C).
+// De ahi el nombre del vector. No se puede usar INT0/INT1 en su lugar: esos
+// son PD2 y PD3, que estan en el bus de datos.
+//
+// El PCINT dispara en los dos flancos, igual que el CHANGE de la libreria.
+//
+// Version anterior, con YetAnotherPcInt: ver el historial de git. La libreria
+// costaba ~54 ciclos por interrupcion en despachar (reconstruia que pin habia
+// cambiado y llamaba por puntero a funcion), mas 1,4 KB de flash y 105 bytes
+// de RAM, porque emite las tres ISR de PCINT y guarda estado de los tres
+// puertos aunque aca se use un solo pin.
+ISR(PCINT1_vect)
 {
-  //zz++;
-  //digitalWrite(LED, zz & 0x2 ? HIGH: LOW);
-  
-  if (pinstate)
-  { 
+  // UNA sola lectura del puerto. Antes CS, A0 y RD se leian por separado y
+  // con varios microsegundos de diferencia: podian no corresponder al mismo
+  // ciclo de bus. Con una lectura unica son coherentes por construccion.
+  register uint8_t pc = PINC;
+
+  if (pc & MSX_CS_MASK)
+  {
     //La interrupción se produjo porque el decoder deja de seleccionar la interfaz
     configDataBusAsInput();
-    digitalWrite(MSX_EN_PIN, HIGH); //habilito
+    _delay_us(MSX_REENABLE_DELAY_US); //dejo que el Z80 cierre el ciclo — ver defs.h
+    PORTC |= MSX_EN_MASK;             //habilito
+    return;
   }
-  else
+
+  //La interrupción se produjo porque el decoder selecciona la interfaz
+  if (!(pc & MSX_A0_MASK))
   {
-    //La interrupción se produjo porque el decoder selecciona la interfaz
-    //delayMicroseconds(10);
-    if (digitalRead(MSX_A0_PIN) == LOW)
+    //se accede al DATA REGISTER
+    if (!(pc & MSX_RD_MASK))
     {
-      //se accede al DATA REGISTER
-      if (digitalRead(MSX_RD_PIN) == LOW)
-      {
-        //MSX lee un byte
-        //delayMicroseconds(10);
-        configDataBusAsOutput();
-        writeDataBusByte(dataToSend());
-      }
-      else
-      {
-        //MSX envía un byte
-        processData(readDataBusByte());
-      }
+      //MSX lee un byte
+      configDataBusAsOutput();
+      writeDataBusByte(dataToSend());
     }
     else
     {
-      //se accede al COMMAND/STATUS REGISTER
-      if (digitalRead(MSX_RD_PIN) == LOW)
-      {
-        //MSX lee registro de estado
-        configDataBusAsOutput();
-        writeDataBusByte(_stat); //en _stat deberia indicarse lo necesario para el driver en MSX. no se usa por ahora
-      }
-      else
-      {
-        //MSX envía un comando
-        processCommand(readDataBusByte());
-      }
+      //MSX envía un byte
+      processData(readDataBusByte());
     }
-    digitalWrite(MSX_EN_PIN, LOW); //suelto WAIT
   }
+  else
+  {
+    //se accede al COMMAND/STATUS REGISTER
+    if (!(pc & MSX_RD_MASK))
+    {
+      //MSX lee registro de estado
+      configDataBusAsOutput();
+      writeDataBusByte(_stat); //en _stat deberia indicarse lo necesario para el driver en MSX. no se usa por ahora
+    }
+    else
+    {
+      //MSX envía un comando
+      processCommand(readDataBusByte());
+    }
+  }
+  PORTC &= ~MSX_EN_MASK; //suelto WAIT
 }
 
+File dir;
+
+/*
+void findDsk()
+{
+  while (true) {
+    File entry =  dir.openNextFile();
+    if (entry)
+    {
+      char name[14];
+      memset(name, 0, sizeof(name));
+      entry.getName(name, sizeof(name));
+      entry.close();
+
+      String s = String(name);
+      s.toUpperCase();
+      if (s.endsWith(".DSK"))
+      {
+        strcpy(curFile, name);
+        u8x8.drawString(0,0,"              ");
+        u8x8.drawString(0,0,name);
+        break;
+      }
+    }
+    else
+      dir.rewindDirectory();
+  }
+  //dir.close();
+}
+*/
 
 void setup() {
-  pinMode(LED, OUTPUT);
+  pinMode(BOTON1, INPUT_PULLUP);
+  pinMode(BOTON2, INPUT_PULLUP);
   pinMode(MSX_CS_PIN, INPUT);
   pinMode(MSX_A0_PIN, INPUT);
   pinMode(MSX_RD_PIN, INPUT);
   pinMode(MSX_EN_PIN, OUTPUT);
   pinMode(CS, OUTPUT);
 
+  //u8x8.begin();
+  //u8x8.setPowerSave(0);
+  //u8x8.setFont(u8x8_font_chroma48medium8_r);
+
   configDataBusAsInput();
 
-  //Serial.print("Init\nSD");
   while (!SD.begin(CS, SPI_FULL_SPEED))
   {
-    digitalWrite(8, HIGH);
-    delay(500);
-    digitalWrite(8, LOW);
-    delay(200);
+    //u8x8.drawString(0,0,"Inserte SD");
   }
-
+  //u8x8.drawString(0,0,"SD OK");
+  
+  dir = SD.open("/");
+  //findDsk();
+  
   digitalWrite(MSX_EN_PIN, LOW); //deshabilito el decoder
-  PcInt::attachInterrupt(MSX_CS_PIN, pinChanged_sd, "", CHANGE);
+
+  // Armo el pin-change de PC0 (PCINT8) a mano. El orden importa: primero
+  // elijo el pin, despues descarto un flag que pueda haber quedado pendiente
+  // de antes, y recien ahi habilito el grupo. Al reves entraria a la ISR
+  // apenas se habilita, por un flanco viejo.
+  PCMSK1 = _BV(PCINT8); //solo PC0; los otros 7 pines del puerto C no interrumpen
+  PCIFR  = _BV(PCIF1);  //escribir 1 limpia el flag
+  PCICR |= _BV(PCIE1);
+
   digitalWrite(MSX_EN_PIN, HIGH); //habilito el decoder
 }
   
 void loop()
 {
-  //TODO: aqui deeria usarse card.off() para determinar si la tarjeta fue extraida y volver al inicio, posilemente indicando un disk change
-  //por ahora solo hago parpadear un led para indicar que esta funcionando correctamente
-    digitalWrite(LED, HIGH);
+  /*
+  if (SD.card()->errorCode() == SD_CARD_ERROR_NOT_PRESENT) {
+    u8x8.drawString(0,0,"out");
+  }
+  */
+
+  /*
+  if (digitalRead(BOTON1)==LOW)
+  {
     delay(100);
-    digitalWrite(LED, LOW);
+    while (digitalRead(BOTON1)==LOW);
+    //u8x8.drawString(0,0,String(_disk_number++).c_str());
+    findDsk();
     delay(100);
+  }
+
+  if (digitalRead(BOTON2)==LOW)
+  {
+    delay(100);
+    while (digitalRead(BOTON2)==LOW);
+    if (_disk_number > 0)
+      u8x8.drawString(0,0,String(_disk_number--).c_str());
+    delay(100);
+  }
+  */
 }

@@ -1,0 +1,1346 @@
+PROTEL NETLIST 2.0
+[
+DESIGNATOR
+U1
+FOOTPRINT
+PDIP-28_L37.0-W13.5-P2.54-LS15.6-BL
+PARTTYPE
+W27C512-45Z
+DESCRIPTION
+Interface:Parallel Port (Parallel) Memory Size:512Kbit Clock Frequency:- Clock Frequency:- Write Cycle Time(Tw):100us Data Retention - TDR (Year):- Write Cycle Endurance:- Features:Secure erase function Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+W27C512-45Z
+Designator
+U1
+Device
+W27C512-45Z
+Unique ID
+gge1
+Name
+W27C512-45Z
+Reuse Block
+
+Group ID
+
+Channel ID
+
+LCSC Part Name
+高速低功耗电可擦除可编程只读存储器
+Supplier Part
+C19311781
+Manufacturer
+Winbond(华邦)
+Manufacturer Part
+W27C512-45Z
+Supplier Footprint
+PDIP-28
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://item.szlcsc.com/datasheet/W27C512-45Z/20599581.html
+Supplier
+LCSC
+3D Model Title
+PDIP-28_L37.0-W13.5-H5-P2.54-LS15.6-BL
+Interface
+Parallel Port (Parallel)
+Memory Size
+512Kbit
+Clock Frequency
+-
+Write Cycle Time(Tw)
+100us
+Data Retention - TDR (Year)
+-
+Write Cycle Endurance
+-
+Features
+Secure erase function
+Voltage - Supply
+4.75V~5.25V
+Operating Temperature
+0℃~+70℃
+Operating Current
+30mA
+Standby Current
+1mA
+Access Time
+45ns
+Description
+Interface:Parallel Port (Parallel) Memory Size:512Kbit Clock Frequency:- Clock Frequency:- Write Cycle Time(Tw):100us Data Retention - TDR (Year):- Write Cycle Endurance:- Features:Secure erase function Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~
+
+*
+]
+[
+DESIGNATOR
+CON1
+FOOTPRINT
+Mis_huellas:CARTRIDGE_MSX
+PARTTYPE
+Library_MSX-CONNECTOR
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+CON1
+Symbol
+Library_MSX-CONNECTOR
+Device
+Library_MSX-CONNECTOR
+Unique ID
+gge2
+Name
+Library_MSX-CONNECTOR
+Reuse Block
+
+Group ID
+
+Channel ID
+
+sheetfile
+05_Cartucho_MSX_Tang_Nano_9k_Mapper.kicad_sch
+sheetname
+
+Value
+MSX-CONNECTOR
+User doc link
+
+Description
+
+
+*
+]
+[
+DESIGNATOR
+U2
+FOOTPRINT
+PDIP-20_L24.5-W6.4-P2.54-LS7.9-BL
+PARTTYPE
+SN74LS245N
+DESCRIPTION
+Input type:Schmitt trigger output type:Tri-State Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~5.25V Number of Elements:1 Number of Bits per Element:8 Channel Type:Bidirectional Current - Output Low(IOL):24mA Current - Output High(IOH):15mA Logic Fa
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+SN74LS245N
+Designator
+U2
+Device
+SN74LS245N
+Unique ID
+gge3
+Name
+SN74LS245N
+Reuse Block
+
+Group ID
+
+Channel ID
+
+LCSC Part Name
+三态输出，八路总线收发器
+Supplier Part
+C352966
+Manufacturer
+TI(德州仪器)
+Manufacturer Part
+SN74LS245N
+Supplier Footprint
+DIP-20
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://www.ti.com/cn/lit/ds/symlink/sn74ls245.pdf
+Supplier
+LCSC
+3D Model Title
+DIP-20_L25.5-W10.0-H3.7-P2.54-LS7.6-BL
+Input type
+Schmitt trigger
+output type
+Tri-State
+Voltage - Supply
+4.75V~5.25V
+Number of Elements
+1
+Number of Bits per Element
+8
+Channel Type
+Bidirectional
+Current - Output Low(IOL)
+24mA
+Current - Output High(IOH)
+15mA
+Logic Family
+74LS
+Operating Temperature
+0℃~+70℃
+Quiescent Current
+95mA
+Propagation Delay
+12ns@5V,45pF
+Features
+Output enable
+Description
+Input type:Schmitt trigger output type:Tri-State Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~5.25V Number of Elements:1 Number of Bits per Element:8 Channel Type:Bidirectional Current - Output Low(IOL):24mA Current - Output High(IOH):15mA Logic Fa
+
+*
+]
+[
+DESIGNATOR
+U3
+FOOTPRINT
+DIP-28_L34.6-W7.3-P2.54-LS10.2-BL
+PARTTYPE
+ATMEGA328P-PU
+DESCRIPTION
+CPU Core:AVR CPU Maximum Speed:20MHz Program Storage Size:32KB Program Memory Type:FLASH Number of I/O:23 ADC (Bit):10bit Voltage - Supply:1.8V~5.5V Voltage - Supply:1.8V~5.5V Applications:- 
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+ATMEGA328P-PU
+Designator
+U3
+Device
+ATMEGA328P-PU
+Unique ID
+gge4
+Name
+ATMEGA328P-PU
+Reuse Block
+
+Group ID
+
+Channel ID
+
+LCSC Part Name
+MSL=1 基于AVR增强型RISC架构的低功耗CMOS 8位微控制器
+Supplier Part
+C33901
+Manufacturer
+MICROCHIP(美国微芯)
+Manufacturer Part
+ATMEGA328P-PU
+Supplier Footprint
+DIP-28-300mil
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://item.szlcsc.com/datasheet/ATMEGA328P-PU/34869.html
+Supplier
+LCSC
+3D Model Title
+DIP-28_L34.6-W7.3-H4.6-P2.54-LS10.2-BL
+CPU Core
+AVR
+CPU Maximum Speed
+20MHz
+Program Storage Size
+32KB
+Program Memory Type
+FLASH
+Number of I/O
+23
+ADC (Bit)
+10bit
+Voltage - Supply
+1.8V~5.5V
+Applications
+-
+Description
+CPU Core:AVR CPU Maximum Speed:20MHz Program Storage Size:32KB Program Memory Type:FLASH Number of I/O:23 ADC (Bit):10bit Voltage - Supply:1.8V~5.5V Voltage - Supply:1.8V~5.5V Applications:- 
+
+*
+]
+[
+DESIGNATOR
+U4
+FOOTPRINT
+DIP-16_L19.8-W6.5-P2.54-LS7.6-BL
+PARTTYPE
+SN74LS138N
+DESCRIPTION
+Type:Decoder Voltage Supply Source:Single Supply Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~5.25V Number of lines:3/8 Number of lines:3/8 Current - Output Low(IOL):8mA Current - Output High(IOH):400uA Operating temperature:0℃~+70℃ Operating tempe
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+SN74LS138N
+Designator
+U4
+Device
+SN74LS138N
+Unique ID
+gge5
+Name
+SN74LS138N
+Reuse Block
+
+Group ID
+
+Channel ID
+
+LCSC Part Name
+3线至8线解码器/多路分配器
+Supplier Part
+C352964
+Manufacturer
+TI(德州仪器)
+Manufacturer Part
+SN74LS138N
+Supplier Footprint
+DIP-16
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://www.ti.com/cn/lit/ds/symlink/sn74ls138.pdf
+Supplier
+LCSC
+3D Model Title
+DIP-16_L20.0-W6.4-H3.5-LS7.62-P2.54
+Type
+Decoder
+Voltage Supply Source
+Single Supply
+Voltage - Supply
+4.75V~5.25V
+Number of lines
+3/8
+Current - Output Low(IOL)
+8mA
+Current - Output High(IOH)
+400uA
+Operating temperature
+0℃~+70℃
+Propagation Delay
+41ns@5V,15pF
+Quiescent Current
+10mA
+Function
+-
+Series
+74LS
+Description
+Type:Decoder Voltage Supply Source:Single Supply Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~5.25V Number of lines:3/8 Number of lines:3/8 Current - Output Low(IOL):8mA Current - Output High(IOH):400uA Operating temperature:0℃~+70℃ Operating tempe
+
+*
+]
+[
+DESIGNATOR
+U5
+FOOTPRINT
+DIP-16_L19.8-W6.5-P2.54-LS7.6-BL
+PARTTYPE
+SN74LS138N
+DESCRIPTION
+Type:Decoder Voltage Supply Source:Single Supply Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~5.25V Number of lines:3/8 Number of lines:3/8 Current - Output Low(IOL):8mA Current - Output High(IOH):400uA Operating temperature:0℃~+70℃ Operating tempe
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+SN74LS138N
+Designator
+U5
+Device
+SN74LS138N
+Unique ID
+gge6
+Name
+SN74LS138N
+Reuse Block
+
+Group ID
+
+Channel ID
+
+LCSC Part Name
+3线至8线解码器/多路分配器
+Supplier Part
+C352964
+Manufacturer
+TI(德州仪器)
+Manufacturer Part
+SN74LS138N
+Supplier Footprint
+DIP-16
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://www.ti.com/cn/lit/ds/symlink/sn74ls138.pdf
+Supplier
+LCSC
+3D Model Title
+DIP-16_L20.0-W6.4-H3.5-LS7.62-P2.54
+Type
+Decoder
+Voltage Supply Source
+Single Supply
+Voltage - Supply
+4.75V~5.25V
+Number of lines
+3/8
+Current - Output Low(IOL)
+8mA
+Current - Output High(IOH)
+400uA
+Operating temperature
+0℃~+70℃
+Propagation Delay
+41ns@5V,15pF
+Quiescent Current
+10mA
+Function
+-
+Series
+74LS
+Description
+Type:Decoder Voltage Supply Source:Single Supply Voltage - Supply:4.75V~5.25V Voltage - Supply:4.75V~5.25V Number of lines:3/8 Number of lines:3/8 Current - Output Low(IOL):8mA Current - Output High(IOH):400uA Operating temperature:0℃~+70℃ Operating tempe
+
+*
+]
+[
+DESIGNATOR
+X1
+FOOTPRINT
+HC-49US_L11.5-W4.5-P4.88
+PARTTYPE
+HC-49/U-S16000000ABJB
+DESCRIPTION
+Type:- Frequency:16MHz Normal temperature Frequency Tolerance:±30ppm Normal temperature Frequency Tolerance:±30ppm Load Capacitance:18pF Frequency Stability:±50ppm Frequency Stability:±50ppm Equivalent Series Resistance(ESR):50Ω Operating Temperature:-10℃
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+HC-49/U-S16000000ABJB
+Designator
+X1
+Device
+HC-49/U-S16000000ABJB
+Unique ID
+gge7
+Name
+20MHz
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Value
+20MHz
+Supplier Part
+
+LCSC Part Name
+16MHz ±30ppm 18pF
+Manufacturer
+CITIZEN
+Manufacturer Part
+HC-49/U-S16000000ABJB
+Supplier Footprint
+HC-49S
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://item.szlcsc.com/datasheet/HC-49%252FU-S16000000ABJB/307702.html
+Supplier
+LCSC
+3D Model Title
+HC-49US_L11.0-W4.5-H3.5-P4.88
+Type
+-
+Normal temperature Frequency Tolerance
+±30ppm
+Load Capacitance
+18pF
+Frequency Stability
+±50ppm
+Equivalent Series Resistance(ESR)
+50Ω
+Operating Temperature
+-10℃~+60℃
+Description
+Type:- Frequency:16MHz Normal temperature Frequency Tolerance:±30ppm Normal temperature Frequency Tolerance:±30ppm Load Capacitance:18pF Frequency Stability:±50ppm Frequency Stability:±50ppm Equivalent Series Resistance(ESR):50Ω Operating Temperature:-10℃
+
+*
+]
+[
+DESIGNATOR
+C1
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C1
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge8
+Name
+22pF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Value
+22pF
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C2
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C2
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge9
+Name
+22pF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Value
+22pF
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C3
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C3
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge10
+Name
+100nF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Value
+100nF
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C4
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C4
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge11
+Name
+100nF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Value
+100nF
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C5
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C5
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge12
+Name
+100nF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Value
+100nF
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C6
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C6
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge13
+Name
+100nF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Value
+100nF
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C7
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C7
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge14
+Name
+100nF
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Value
+100nF
+Description
+
+
+*
+]
+[
+DESIGNATOR
+R1
+FOOTPRINT
+R0603
+PARTTYPE
+Res_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+R1
+Symbol
+Res
+Device
+Res_0603
+Unique ID
+gge15
+Name
+10K
+Reuse Block
+
+Group ID
+
+Channel ID
+
+Supplier Footprint
+0603
+3D Model Title
+R0603
+Value
+10K
+Description
+
+
+*
+]
+[
+DESIGNATOR
+C8
+FOOTPRINT
+C0603
+PARTTYPE
+CAP_0603
+DESCRIPTION
+
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Designator
+C8
+Symbol
+CAP_OLD
+Device
+CAP_0603
+Unique ID
+gge16
+Supplier Footprint
+0603
+3D Model Title
+C0603_L1.6-W0.8-H0.8
+Value
+100nF
+Name
+100nF
+Description
+
+Reuse Block
+
+Group ID
+
+Channel ID
+
+
+*
+]
+[
+DESIGNATOR
+H1
+FOOTPRINT
+HDR-TH_10P-P2.54-V-M
+PARTTYPE
+PZ254V-11-10P
+DESCRIPTION
+Pin Structure:1x10P Pitch:2.54mm Row Spacing:- Circluar Pins/Square Pins:Pin Header Mounting Type:Through Hole Number of Rows:1 Number of Pins:10P Current Rating:3A Voltage Rating (Max):250V Length of Mating Pin:6mm Insulation Height:2.5mm Length of End C
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+PZ254V-11-10P
+Designator
+H1
+Device
+PZ254V-11-10P
+Unique ID
+gge17
+Name
+PZ254V-11-10P
+Reuse Block
+
+Group ID
+
+Channel ID
+
+LCSC Part Name
+1x10P 间距:2.54mm 方针 直插
+Supplier Part
+C492409
+Manufacturer
+XFCN(兴飞)
+Manufacturer Part
+PZ254V-11-10P
+Supplier Footprint
+插件,P=2.54mm
+JLCPCB Part Class
+Extended Part
+Datasheet
+https://item.szlcsc.com/datasheet/PZ254V-11-10P/502965.html
+Supplier
+LCSC
+3D Model Title
+HDR2.54-M-LI-1X10P
+Pin Structure
+1x10P
+Pitch
+2.54mm
+Row Spacing
+-
+Circluar Pins/Square Pins
+Pin Header
+Mounting Type
+Through Hole
+Number of Rows
+1
+Number of Pins
+10P
+Current Rating
+3A
+Voltage Rating (Max)
+250V
+Length of Mating Pin
+6mm
+Insulation Height
+2.5mm
+Length of End Connection Pin
+3mm
+Contact Material
+Brass
+Contact Plating
+-
+Operating Temperature
+-40℃~+105℃
+Color
+Black
+Description
+Pin Structure:1x10P Pitch:2.54mm Row Spacing:- Circluar Pins/Square Pins:Pin Header Mounting Type:Through Hole Number of Rows:1 Number of Pins:10P Current Rating:3A Voltage Rating (Max):250V Length of Mating Pin:6mm Insulation Height:2.5mm Length of End C
+
+*
+]
+[
+DESIGNATOR
+C9
+FOOTPRINT
+CAP-TH_BD5.0-P2.00-D0.8-FD
+PARTTYPE
+EWH1CM101D11OT
+DESCRIPTION
+Capacitance: Tolerance:±20% Tolerance:±20% Rated Voltage: Ripple Current:110mA@120Hz Equivalent Series Resistance(ESR):- Lead Spacing: φD: L: Lifetime @ Temp:2000hrs@105℃ 
+Component Kind
+Standard
+Add into BOM
+yes
+Convert to PCB
+yes
+Symbol
+EWH1CM101D11OT
+Designator
+C9
+Supplier
+LCSC
+Manufacturer
+AISHI(艾华集团)
+Manufacturer Part
+EWH1CM101D11OT
+Value
+100uF
+Supplier Part
+C105312
+JLCPCB Part Class
+Extended Part
+Device
+EWH1CM101D11OT
+Unique ID
+gge18
+Supplier Footprint
+插件,D5xL11mm
+3D Model Title
+CAP-TH_D5.0×H7.0×P2.0
+Name
+100uF
+Description
+Capacitance: Tolerance:±20% Tolerance:±20% Rated Voltage: Ripple Current:110mA@120Hz Equivalent Series Resistance(ESR):- Lead Spacing: φD: L: Lifetime @ Temp:2000hrs@105℃ 
+LCSC Part Name
+100uF ±20% 16V
+Datasheet
+https://atta.szlcsc.com/upload/public/pdf/source/20200106/C481308_16D735F9103482ADD8491C667D201AFA.pdf
+Tolerance
+±20%
+Rated Voltage
+
+Ripple Current
+110mA@120Hz
+Equivalent Series Resistance(ESR)
+-
+Lead Spacing
+
+φD
+
+L
+
+Lifetime @ Temp
+2000hrs@105℃
+
+*
+]
+(
+A15 
+U1-1 W27C512-45Z-A15 Passive 
+CON1-18 Library_MSX-CONNECTOR-A15 Passive 
+)
+(
+A12 
+U1-2 W27C512-45Z-A12 Passive 
+CON1-23 Library_MSX-CONNECTOR-A12 Passive 
+)
+(
+A7 
+U1-3 W27C512-45Z-A7 Passive 
+CON1-21 Library_MSX-CONNECTOR-A7 Passive 
+U4-1 SN74LS138N-A Input   
+)
+(
+A6 
+U1-4 W27C512-45Z-A6 Passive 
+CON1-22 Library_MSX-CONNECTOR-A6 Passive 
+U4-2 SN74LS138N-B Input   
+)
+(
+A5 
+U1-5 W27C512-45Z-A5 Passive 
+CON1-31 Library_MSX-CONNECTOR-A5 Passive 
+U4-3 SN74LS138N-C Input   
+)
+(
+A4 
+U1-6 W27C512-45Z-A4 Passive 
+CON1-32 Library_MSX-CONNECTOR-A4 Passive 
+U4-4 SN74LS138N-G#2A Input   
+)
+(
+A3 
+U1-7 W27C512-45Z-A3 Passive 
+CON1-29 Library_MSX-CONNECTOR-A3 Passive 
+U5-1 SN74LS138N-A Input   
+)
+(
+A2 
+U1-8 W27C512-45Z-A2 Passive 
+CON1-30 Library_MSX-CONNECTOR-A2 Passive 
+U5-2 SN74LS138N-B Input   
+)
+(
+A1 
+U1-9 W27C512-45Z-A1 Passive 
+CON1-27 Library_MSX-CONNECTOR-A1 Passive 
+U5-3 SN74LS138N-C Input   
+)
+(
+A0 
+U1-10 W27C512-45Z-A0 Passive 
+CON1-28 Library_MSX-CONNECTOR-A0 Passive 
+U3-24 ATMEGA328P-PU-PC1 ADC1 Passive 
+)
+(
+D0 
+U1-11 W27C512-45Z-Q0 Passive 
+CON1-34 Library_MSX-CONNECTOR-D0 Passive 
+U2-2 SN74LS245N-A1 Input   
+)
+(
+D1 
+U1-12 W27C512-45Z-Q1 Passive 
+CON1-33 Library_MSX-CONNECTOR-D1 Passive 
+U2-3 SN74LS245N-A2 Input   
+)
+(
+D2 
+U1-13 W27C512-45Z-Q2 Passive 
+CON1-36 Library_MSX-CONNECTOR-D2 Passive 
+U2-4 SN74LS245N-A3 Input   
+)
+(
+GND 
+U1-14 W27C512-45Z-GND Passive 
+CON1-41 Library_MSX-CONNECTOR-GND@1 Passive 
+CON1-43 Library_MSX-CONNECTOR-GND@2 Passive 
+U2-10 SN74LS245N-GND Input   
+U3-8 ATMEGA328P-PU-GND Passive 
+U3-22 ATMEGA328P-PU-GND Passive 
+U4-8 SN74LS138N-GND Input   
+U5-5 SN74LS138N-G#2B Input   
+U5-8 SN74LS138N-GND Input   
+C1-2 CAP_0603-2 Input   
+C2-2 CAP_0603-2 Input   
+C3-2 CAP_0603-2 Input   
+C4-2 CAP_0603-2 Input   
+C5-2 CAP_0603-2 Input   
+C6-2 CAP_0603-2 Input   
+C7-2 CAP_0603-2 Input   
+C8-2 CAP_0603-2 Input   
+H1-10 PZ254V-11-10P-10 Passive 
+C9-2 EWH1CM101D11OT-2 Input   
+)
+(
+D3 
+U1-15 W27C512-45Z-Q3 Passive 
+CON1-35 Library_MSX-CONNECTOR-D3 Passive 
+U2-5 SN74LS245N-A4 Input   
+)
+(
+D4 
+U1-16 W27C512-45Z-Q4 Passive 
+CON1-38 Library_MSX-CONNECTOR-D4 Passive 
+U2-6 SN74LS245N-A5 Input   
+)
+(
+D5 
+U1-17 W27C512-45Z-Q5 Passive 
+CON1-37 Library_MSX-CONNECTOR-D5 Passive 
+U2-7 SN74LS245N-A6 Input   
+)
+(
+D6 
+U1-18 W27C512-45Z-Q6 Passive 
+CON1-40 Library_MSX-CONNECTOR-D6 Passive 
+U2-8 SN74LS245N-A7 Input   
+)
+(
+D7 
+U1-19 W27C512-45Z-Q7 Passive 
+CON1-39 Library_MSX-CONNECTOR-D7 Passive 
+U2-9 SN74LS245N-A8 Input   
+)
+(
+/SLTSL 
+U1-20 W27C512-45Z-CE# Passive 
+CON1-4 Library_MSX-CONNECTOR-~{SLTSL} Passive 
+)
+(
+A10 
+U1-21 W27C512-45Z-A10 Passive 
+CON1-20 Library_MSX-CONNECTOR-A10 Passive 
+)
+(
+/RD 
+U1-22 W27C512-45Z-OE/Vpp# Passive 
+CON1-14 Library_MSX-CONNECTOR-~{RD} Passive 
+U2-1 SN74LS245N-DIR Input   
+U3-25 ATMEGA328P-PU-PC2 ADC2 Passive 
+)
+(
+A11 
+U1-23 W27C512-45Z-A11 Passive 
+CON1-19 Library_MSX-CONNECTOR-A11 Passive 
+)
+(
+A9 
+U1-24 W27C512-45Z-A9 Passive 
+CON1-17 Library_MSX-CONNECTOR-A9 Passive 
+)
+(
+A8 
+U1-25 W27C512-45Z-A8 Passive 
+CON1-24 Library_MSX-CONNECTOR-A8 Passive 
+)
+(
+A13 
+U1-26 W27C512-45Z-A13 Passive 
+CON1-26 Library_MSX-CONNECTOR-A13 Passive 
+)
+(
+A14 
+U1-27 W27C512-45Z-A14 Passive 
+CON1-25 Library_MSX-CONNECTOR-A14 Passive 
+)
+(
+VCC 
+U1-28 W27C512-45Z-VCC Passive 
+CON1-45 Library_MSX-CONNECTOR-5V@1 Passive 
+CON1-47 Library_MSX-CONNECTOR-5V@2 Passive 
+U2-20 SN74LS245N-VCC Input   
+U3-7 ATMEGA328P-PU-VCC Passive 
+U3-20 ATMEGA328P-PU-AVCC Passive 
+U4-16 SN74LS138N-VCC Input   
+U5-16 SN74LS138N-VCC Input   
+C3-1 CAP_0603-1 Input   
+C4-1 CAP_0603-1 Input   
+C5-1 CAP_0603-1 Input   
+C6-1 CAP_0603-1 Input   
+C7-1 CAP_0603-1 Input   
+R1-1 Res_0603-1 Input   
+H1-1 PZ254V-11-10P-1 Passive 
+C9-1 EWH1CM101D11OT-1 Input   
+)
+(
+$1N38 
+CON1-44 Library_MSX-CONNECTOR-SW1 Passive 
+CON1-46 Library_MSX-CONNECTOR-SW2 Passive 
+)
+(
+MSX_CS_PIN 
+CON1-7 Library_MSX-CONNECTOR-/WAIT Passive 
+U2-19 SN74LS245N-#OE Input   
+U3-23 ATMEGA328P-PU-PC0 ADC0 Passive 
+U5-15 SN74LS138N-Y0 Input   
+)
+(
+M1 
+CON1-9 Library_MSX-CONNECTOR-M1 Passive 
+U4-6 SN74LS138N-G1 Input   
+)
+(
+/IORQ 
+CON1-11 Library_MSX-CONNECTOR-~{IORQ} Passive 
+U4-5 SN74LS138N-G#2B Input   
+)
+(
+PD7 
+U2-11 SN74LS245N-B8 Input   
+U3-13 ATMEGA328P-PU-AIN1 PD7 Passive 
+)
+(
+PD6 
+U2-12 SN74LS245N-B7 Input   
+U3-12 ATMEGA328P-PU-AIN0 PD6 Passive 
+)
+(
+PD5 
+U2-13 SN74LS245N-B6 Input   
+U3-11 ATMEGA328P-PU-T1 PD5 Passive 
+)
+(
+PD4 
+U2-14 SN74LS245N-B5 Input   
+U3-6 ATMEGA328P-PU-T0 PD4 Passive 
+)
+(
+PD3 
+U2-15 SN74LS245N-B4 Input   
+U3-5 ATMEGA328P-PU-INT1 PD3 Passive 
+)
+(
+PD2 
+U2-16 SN74LS245N-B3 Input   
+U3-4 ATMEGA328P-PU-INT0 PD2 Passive 
+)
+(
+PD1 
+U2-17 SN74LS245N-B2 Input   
+U3-3 ATMEGA328P-PU-PD1 TXD Passive 
+)
+(
+PD0 
+U2-18 SN74LS245N-B1 Input   
+U3-2 ATMEGA328P-PU-PD0 RXD Passive 
+)
+(
+$1N128 
+U3-1 ATMEGA328P-PU-PC6 RESET# Passive 
+R1-2 Res_0603-2 Input   
+)
+(
+$1N121 
+U3-9 ATMEGA328P-PU-PB6 XTAL1 Passive 
+X1-2 HC-49/U-S16000000ABJB-2 Passive 
+C1-1 CAP_0603-1 Input   
+)
+(
+$1N122 
+U3-10 ATMEGA328P-PU-PB7 XTAL2 Passive 
+X1-1 HC-49/U-S16000000ABJB-1 Passive 
+C2-1 CAP_0603-1 Input   
+)
+(
+PB0 
+U3-14 ATMEGA328P-PU-PCINT0 PB0 Passive 
+H1-7 PZ254V-11-10P-7 Passive 
+)
+(
+PB1 
+U3-15 ATMEGA328P-PU-PCINT1  PB1 Passive 
+H1-6 PZ254V-11-10P-6 Passive 
+)
+(
+CS 
+U3-16 ATMEGA328P-PU-PCINT2 PB2 Passive 
+H1-5 PZ254V-11-10P-5 Passive 
+)
+(
+MOSI 
+U3-17 ATMEGA328P-PU-PCINT3 PB3 Passive 
+H1-4 PZ254V-11-10P-4 Passive 
+)
+(
+MISO 
+U3-18 ATMEGA328P-PU-PCINT4 PB4 Passive 
+H1-3 PZ254V-11-10P-3 Passive 
+)
+(
+SCK 
+U3-19 ATMEGA328P-PU-PCINT5 PB5 Passive 
+H1-2 PZ254V-11-10P-2 Passive 
+)
+(
+$1N131 
+U3-21 ATMEGA328P-PU-AREF Passive 
+C8-1 CAP_0603-1 Input   
+)
+(
+MSX_EN_PIN 
+U3-26 ATMEGA328P-PU-PC3 ADC3 Passive 
+U5-6 SN74LS138N-G1 Input   
+)
+(
+SDA 
+U3-27 ATMEGA328P-PU-PC4 ADC4 Passive 
+H1-8 PZ254V-11-10P-8 Passive 
+)
+(
+SCL 
+U3-28 ATMEGA328P-PU-PC5 ADC5 Passive 
+H1-9 PZ254V-11-10P-9 Passive 
+)
+(
+$1N104 
+U4-15 SN74LS138N-Y0 Input   
+U5-4 SN74LS138N-G#2A Input   
+)

@@ -1,0 +1,47 @@
+# Por defecto: git normaliza a LF en el repo y hace checkout nativo.
+* text=auto
+
+# --- Cosas que TIENEN que ser LF ----------------------------------
+# make no tolera el \r al final de una receta: falla con errores que no
+# tienen nada que ver con lo que pasa realmente.
+Makefile        text eol=lf
+*.mk            text eol=lf
+*.sh            text eol=lf
+*.py            text eol=lf
+
+# Intel HEX: lo lee avrdude, no una persona. Fijado para que el archivo
+# publicado sea byte a byte el mismo en cualquier maquina.
+*.hex           text eol=lf
+
+# --- Fuentes --------------------------------------------------------
+*.MAC           text
+*.Z80           text
+*.mac           text
+*.z80           text
+*.asm           text
+*.ino           text
+*.h             text
+*.c             text
+*.cpp           text
+*.md            text
+*.csv           text
+*.net           text
+
+# --- Binarios: que git no los toque ni intente diffearlos -----------
+*.zip           binary
+*.pdf           binary
+*.epro2         binary
+*.REL           binary
+*.rel           binary
+*.bin           binary
+*.rom           binary
+*.elf           binary
+*.eep           binary
+*.png           binary
+*.jpg           binary
+*.gif           binary
+
+# --- Ruido en los diffs ---------------------------------------------
+# Derivados de la fuente EasyEDA: se regeneran enteros, el diff no aporta.
+hardware/**/*.net       -diff
+hardware/**/*-bom.csv   -diff

@@ -1,0 +1,64 @@
+# --- Salidas de compilacion ---------------------------------------
+out/
+
+# --- MSX-DOS kit de ASCII (NO versionar) --------------------------
+# build/ es el kit original de ASCII (1984-85): los .REL del kernel
+# (DOSHEAD, BIOS, MSXDOS, SMLDISP, INIT, DSKBASIC, MSXDATA, BASDATA)
+# contra los que linkea nuestro driver, mas MSXDOS.SYS y COMMAND.COM.
+#
+# Es codigo de terceros y este repo es MIT: no se redistribuye hasta
+# tener permiso expreso. El Makefile documenta que archivos van adentro
+# y en que orden se linkean; con tu propia copia del kit, "make rom"
+# reconstruye todo.
+#
+# OJO: es entrada irreemplazable y NO esta respaldada por este repo.
+# Guardala aparte.
+build/
+
+# Por lo mismo, out/sdf1.rom tampoco se publica: es el kernel de ASCII
+# linkeado con nuestro driver. Se compila localmente, no se distribuye.
+# (queda cubierto por out/, se aclara aca para que no se pierda el por que)
+
+# Intermedios del ensamblado del driver
+*.REL
+*.PRN
+*.LST
+*.SYM
+*.CRF
+*.HEX
+
+# Binarios de terceros (N80 / LK80 de Nestor80). Se bajan, no se versionan.
+tools/bin/
+
+# --- Python -------------------------------------------------------
+__pycache__/
+*.py[cod]
+
+# --- Arduino / PlatformIO -----------------------------------------
+.pio/
+.pioenvs/
+.piolibdeps/
+sdf-1-atmega328p/build/
+*.elf
+*.eep
+*.lss
+*.map
+
+# El .hex publicado vive en firmware/ y va versionado a proposito:
+# es codigo 100% propio y permite grabar el ATmega sin toolchain.
+!firmware/*.hex
+
+# --- EasyEDA / CAD ------------------------------------------------
+# Los derivados (gerbers, pdf, bom, netlist) SI van versionados:
+# ver hardware/README.md. Aca solo lo temporal del editor.
+*.epro2.bak
+~$*
+
+# --- Editores y sistema operativo ---------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store

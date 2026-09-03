@@ -18,6 +18,93 @@ para el MSX es una disketera común.
 > mano** antes de funcionar — ver [hardware/rev1/BODGES.md](hardware/rev1/BODGES.md).
 > No es todavía un proyecto "armalo y andá".
 
+## De dónde viene
+
+La idea no es mía. Sale del **[Virtual MSX Disk
+Drive](https://codinglab.blogspot.com/2013/01/virtual-msx-disk-drive.html)** que
+Raul publicó en su blog *Coding Laboratory* en enero de 2013. Ahí está el truco
+que hace posible todo lo demás: decodificar un puerto de I/O, usar esa misma
+señal para bajar el `/WAIT` del Z80, y dejar que un microcontrolador conteste
+con tranquilidad mientras la máquina espera congelada a mitad del ciclo. La
+arquitectura de este cartucho es la suya, y sin ese post no existiría.
+
+Lo que agrega el SDF-1 es llevar esa idea a un diseño completo, documentado y
+reproducible:
+
+**Anda solo, sin una PC atrás.** En el original el Arduino no guarda nada: está
+colgado del USB de una PC y un script de Python le va pasando los sectores de la
+imagen de disco. Acá el ATmega lee el `.DSK` él mismo, de una microSD por SPI. El
+cartucho se enchufa y funciona con la máquina sola.
+
+**Decodificación completa, no una ventana.** El original engancha cualquier
+puerto por debajo de 0x20. Acá dos 74LS138 decodifican `A7..A1` y dejan
+seleccionados **sólo `0x00` y `0x01`**. Las salidas `Y1..Y7` del segundo '138
+quedan libres (cubren `0x02`–`0x0F`) y no van a ningún lado: mover el par de
+puertos es rutear otra salida. En la rev2 eso pasa a ser un jumper, para poder
+esquivar un conflicto sin tocar el cobre.
+
+**Dos puertos, o mejor dicho dos registros.** `A0` no se decodifica como
+selección de chip — es el selector de registro. Un puerto es para transferir
+datos y el otro para gobernar el diálogo, y eso lo resuelve el hardware: el
+protocolo nunca tiene que preguntarse si el byte que acaba de llegar es un dato
+o una orden.
+
+| Puerto | `A0` | Escritura (`OUT`) | Lectura (`IN`) |
+|---|---|---|---|
+| `0x00` | 0 | **Datos**, del MSX al micro | **Datos**, del micro al MSX |
+| `0x01` | 1 | **Comando**: ejecutá esto | **Estado**: cómo venís |
+
+El de datos es **bidireccional**: el mismo registro sirve para los 512 bytes que
+el MSX escribe en un sector y para los 512 que lee. La dirección la resuelve
+`/RD`, que llega al micro y también maneja el `DIR` del '245, así que ni el
+driver ni el firmware tienen que negociar de qué lado va el bus.
+
+El otro registro es **asimétrico a propósito**: escribirlo es *disparar* algo
+(leer un sector, montar una imagen, lo que sume el firmware) y leerlo es
+*preguntar*, sin efecto colateral. Ese lado de lectura es el que convierte el
+handshake en un protocolo de verdad: permite contestar "ocupado", "hubo un
+error" o "tengo tantos bytes para vos" **sin robarle bytes al canal de datos**,
+que es exactamente lo que hace falta para poder soltar el `/WAIT` temprano en
+vez de congelar la máquina durante milisegundos.
+
+> Hoy el registro de estado está **cableado pero todavía no dice nada útil**: el
+> firmware contesta un valor fijo. Llenarlo es el paso "Protocolo v2" del
+> roadmap, y es lo que habilita todo lo demás.
+
+**Las cuatro líneas que tienen que llegar al micro.** El post muestra el
+esquemático en fotos pero nunca dice cuáles son. Además de los 8 bits de datos
+(que pasan por el '245, con `DIR = /RD`, así que la dirección se resuelve sola),
+al ATmega tienen que llegar exactamente cuatro señales:
+
+| Pin | Señal | Para qué |
+|---|---|---|
+| PC0 | Selección decodificada (`U5.Y0`) | Despierta al micro — es `PCINT8`, el disparo del handshake |
+| PC1 | `A0` del MSX | Distingue el registro de datos del de comando |
+| PC2 | `/RD` del MSX | Dice si el ciclo es lectura o escritura |
+| PC3 | Habilitación del decodificador | **Salida**: es con lo que el micro libera el `/WAIT` |
+
+**El `/WAIT`, en colector abierto.** `/WAIT` es una línea *wired-OR* del bus:
+todos los cartuchos la comparten y ninguno debe manejarla en totem-pole. La
+salida de un '138 atacándola directamente entra en contención con cualquier otra
+placa que la tire a bajo. Acá el `/WAIT` sale por una compuerta NAND de colector
+abierto (74LS03): el cartucho **sólo puede tirar la línea a bajo**, nunca
+forzarla a alto. Lo mismo vale para `/BUSDIR`. En la rev1 es el bodge del paso 3
+de [BODGES.md](hardware/rev1/BODGES.md); en la rev2 va en el PCB.
+
+**El mismo micro que usa un Arduino, pero suelto y a 20 MHz.** No hay una placa
+Arduino adentro del cartucho: es el ATmega328P pelado, soldado al PCB, con su
+cristal y nada más. Y ese cristal es de **20 MHz**, no los 16 de una placa
+Arduino: son **un 25 % más de instrucciones** justo en la ventana en la que el
+Z80 está congelado esperando la respuesta. El handshake es un
+`ISR(PCINT1_vect)` con acceso directo a `PIND` / `PORTD` — nada de
+`attachInterrupt()` ni `digitalRead()` mientras la máquina espera.
+
+**Y el código está publicado y explicado.** El original cerraba con un *"sorry I
+didn't document the code so much"* y un link a Google Drive. Acá están las dos
+mitades en el repo, bajo MIT, con el esquemático, los Gerbers, la BOM y la lista
+de correcciones de la rev1 — y el protocolo definido en un solo lugar
+([`defs.h`](sdf-1-atmega328p/defs.h)), usado desde los dos lados.
+
 ## Cómo está hecho
 
 El cartucho tiene dos mitades que se hablan por un puerto de I/O:

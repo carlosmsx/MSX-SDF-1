@@ -18,18 +18,14 @@ para el MSX es una disketera común.
 > mano** antes de funcionar — ver [hardware/rev1/BODGES.md](hardware/rev1/BODGES.md).
 > No es todavía un proyecto "armalo y andá".
 
-## De dónde viene
+## Las decisiones de diseño
 
-La idea no es mía. Sale del **[Virtual MSX Disk
-Drive](https://codinglab.blogspot.com/2013/01/virtual-msx-disk-drive.html)** que
-Raul publicó en su blog *Coding Laboratory* en enero de 2013. Ahí está el truco
-que hace posible todo lo demás: decodificar un puerto de I/O, usar esa misma
-señal para bajar el `/WAIT` del Z80, y dejar que un microcontrolador conteste
-con tranquilidad mientras la máquina espera congelada a mitad del ciclo. La
-arquitectura de este cartucho es la suya, y sin ese post no existiría.
-
-Lo que agrega el SDF-1 es llevar esa idea a un diseño completo, documentado y
-reproducible:
+El truco de fondo —bajar el `/WAIT` del Z80 con la misma señal que decodifica el
+puerto, y contestar con un microcontrolador mientras la máquina espera congelada
+a mitad del ciclo— lo tomé del [Virtual MSX Disk
+Drive](https://codinglab.blogspot.com/2013/01/virtual-msx-disk-drive.html) que
+Raul publicó en 2013. De ahí en más, todo lo demás está resuelto acá, y es donde
+está el trabajo:
 
 **Anda solo, sin una PC atrás.** En el original el Arduino no guarda nada: está
 colgado del USB de una PC y un script de Python le va pasando los sectores de la

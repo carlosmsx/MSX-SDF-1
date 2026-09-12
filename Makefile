@@ -167,8 +167,21 @@ ARDUINO_USER ?= $(firstword $(wildcard \
 # cartucho. Cuando exista el bootloader propio, esto cambia.
 FQBN := MiniCore:avr:328:clock=20MHz_external,BOD=2v7,LTO=Os,variant=modelP,eeprom=keep,bootloader=no_bootloader
 
-# Programador ISP. usbasp es el barato y el que asume BODGES.md paso 5.
+# Programador ISP. usbasp es el barato y el que asume CORRECCIONES.md paso 1.
 PROGRAMMER ?= usbasp
+
+# avrdude para "make flash": el mismo que instala el Arduino IDE, sin PATH.
+# Si hay mas de uno se queda con el ultimo en orden alfabetico; si queres
+# otro, pasalo a mano: make flash AVRDUDE=/ruta/a/avrdude
+AVRDUDE      ?= $(lastword $(sort $(wildcard \
+                  $(ARDUINO_DATA)/packages/*/tools/avrdude/*/bin/avrdude \
+                  $(ARDUINO_DATA)/packages/*/tools/avrdude/*/bin/avrdude.exe)))
+AVRDUDE_CONF ?= $(dir $(AVRDUDE))../etc/avrdude.conf
+
+# El -p de avrdude sale del FQBN. modelP es el ATmega328P (firma 1E950F) y
+# modelNonP el 328 sin P (1E9514): mismo micro, pero avrdude no graba si la
+# firma no coincide con la del modelo que le pasas.
+AVR_PART := $(if $(findstring variant=modelNonP,$(FQBN)),m328,m328p)
 
 # Las tres cosas que necesita el .exe para encontrar cores y librerias.
 ACLI = ARDUINO_DIRECTORIES_DATA="$(ARDUINO_DATA)" \
@@ -185,14 +198,18 @@ check-firmware:
 	@test -x "$(ARDUINO_CLI)" || { echo "falta arduino-cli en '$(ARDUINO_CLI)'"; exit 1; }
 	@test -d "$(ARDUINO_DATA)/packages/MiniCore" || { echo "falta MiniCore en $(ARDUINO_DATA)"; exit 1; }
 	@test -d "$(ARDUINO_USER)/libraries" || { echo "no encuentro el sketchbook (ARDUINO_USER)"; exit 1; }
+	@test -x "$(AVRDUDE)" || { echo "falta avrdude en $(ARDUINO_DATA)/packages — ver AVRDUDE"; exit 1; }
+	@test -f "$(AVRDUDE_CONF)" || { echo "falta avrdude.conf en '$(AVRDUDE_CONF)'"; exit 1; }
 	@echo "cli   $$($(ACLI) version)"
 	@echo "data  $(ARDUINO_DATA)"
 	@echo "user  $(ARDUINO_USER)"
 	@echo "fqbn  $(FQBN)"
+	@echo "dude  $(AVRDUDE)"
+	@echo "part  $(AVR_PART) con $(PROGRAMMER)"
 
 # ---- Grabado por ICSP -------------------------------------------------
 #
-# Requiere el cable de RESET del paso 5 de hardware/rev1/BODGES.md.
+# Requiere el cable de RESET del paso 1 de hardware/rev1/CORRECCIONES.md.
 #
 # Desenchufa el modulo de SD antes de grabar: muchos no sueltan MISO con su
 # CS inactivo y el programador lee basura.
@@ -206,5 +223,13 @@ check-firmware:
 fuses:
 	$(ACLI) burn-bootloader -b "$(FQBN)" -P $(PROGRAMMER)
 
+# Aca NO se usa "arduino-cli upload". Con programador, MiniCore graba
+# {proyecto}.with_bootloader.hex, pero con bootloader=no_bootloader su propio
+# hook de compilacion (delete_merged_output) borra ese archivo, asi que el
+# upload fallaba siempre con "with_bootloader.hex is not readable".
+#
+# Sin bootloader el .ino.hex ya es la imagen completa: se graba directo.
+# avrdude borra antes de escribir y verifica despues; la EEPROM sobrevive al
+# borrado porque el fuse EESAVE esta programado (eeprom=keep).
 flash: $(FW_HEX)
-	$(ACLI) upload -b "$(FQBN)" -P $(PROGRAMMER) --input-dir $(FW_OUT) ./$(SKETCH)
+	"$(AVRDUDE)" -C "$(AVRDUDE_CONF)" -c $(PROGRAMMER) -p $(AVR_PART) -U flash:w:$(FW_HEX):i

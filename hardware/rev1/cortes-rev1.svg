@@ -3218,11 +3218,11 @@
 <line x1="20" y1="1540" x2="50" y2="1540" stroke="#1f9d55" stroke-width="4"/><text x="58" y="1545">/IOSEL: U5-15 a U2-19, U3-23 y CON1-7 (/WAIT)</text>
 <text x="20" y="1569">Linea llena: capa de este lado. Punteada: capa del otro lado. Gris: via.</text>
 <text x="20" y="1589">X roja: corte (los dos van en la cara inferior). Circulo violeta: punto de soldadura.</text>
-<text x="20" y="1616"><tspan font-weight="700" fill="#6f2dbd">A</tspan>  U5-15 (/IOSEL): a U6 pines 1 y 2</text>
+<text x="20" y="1616"><tspan font-weight="700" fill="#6f2dbd">A</tspan>  U5-15 (/IOSEL): a U6 pines 12 y 13</text>
 <text x="20" y="1636"><tspan font-weight="700" fill="#6f2dbd">B</tspan>  U5-16 (VCC): puente a U5-6</text>
 <text x="20" y="1656"><tspan font-weight="700" fill="#6f2dbd">C</tspan>  U5-6 (G1): queda aislado por el corte 1</text>
-<text x="20" y="1676"><tspan font-weight="700" fill="#6f2dbd">D</tspan>  U3-26 (PC3): a U6 pin 5, y 10K a U3-22</text>
+<text x="20" y="1676"><tspan font-weight="700" fill="#6f2dbd">D</tspan>  U3-26 (PC3): a U6 pin 9, y 10K a U3-22</text>
 <text x="20" y="1696"><tspan font-weight="700" fill="#6f2dbd">E</tspan>  U3-22 (GND): otra pata del 10K</text>
-<text x="20" y="1716"><tspan font-weight="700" fill="#6f2dbd">F</tspan>  lado conector de /WAIT, en el codo: a U6 pin 6</text>
+<text x="20" y="1716"><tspan font-weight="700" fill="#6f2dbd">F</tspan>  lado conector de /WAIT, en el codo: a U6 pin 8</text>
 <text x="20" y="1744" fill="#666" font-size="12">Generado desde sdf1-gerbers.zip (pistas) y FlyingProbeTesting.json (pads por red).</text>
 </g></svg>

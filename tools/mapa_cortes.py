@@ -35,12 +35,12 @@ NETS = [
 # corte 2 en la diagonal de /WAIT, a 1,5 mm del codo que baja al contacto 7.
 CUTS = [("CORTE 1", (37.47, -52.70)), ("CORTE 2", (76.97, -59.81))]
 SOLDER = [
-    ("A", 41.27, -40.64, "U5-15 (/IOSEL): a U6 pines 1 y 2"),
+    ("A", 41.27, -40.64, "U5-15 (/IOSEL): a U6 pines 12 y 13"),
     ("B", 41.27, -38.10, "U5-16 (VCC): puente a U5-6"),
     ("C", 33.66, -50.80, "U5-6 (G1): queda aislado por el corte 1"),
-    ("D", 97.98, -25.40, "U3-26 (PC3): a U6 pin 5, y 10K a U3-22"),
+    ("D", 97.98, -25.40, "U3-26 (PC3): a U6 pin 9, y 10K a U3-22"),
     ("E", 97.98, -35.56, "U3-22 (GND): otra pata del 10K"),
-    ("F", 78.11, -60.96, "lado conector de /WAIT, en el codo: a U6 pin 6"),
+    ("F", 78.11, -60.96, "lado conector de /WAIT, en el codo: a U6 pin 8"),
 ]
 BG = "#f4f1e8"
 

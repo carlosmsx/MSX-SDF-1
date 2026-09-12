@@ -111,19 +111,25 @@ posible.
 
 | Compuerta | Entradas | Salida | Función |
 |---|---|---|---|
-| 1 | pines 1 y 2, juntos → `U5` pin 15 (punto A) | pin 3, con pull-up de 4K7 a VCC | inversor: `/IOSEL` → `IOSEL_H` |
-| 2 | pin 4 → pin 3 · pin 5 → `PC3`, ATmega pin 26 (punto D) | pin 6 → `CON1-7`, lado conector del corte 2 (punto F) | `/WAIT` |
+| 4 | pines 12 y 13, juntos → `U5` pin 15 (punto A) | pin 11, con pull-up de 4K7 a VCC | inversor: `/IOSEL` → `IOSEL_H` |
+| 3 | pin 10 → pin 11 · pin 9 → `PC3`, ATmega pin 26 (punto D) | pin 8 → `CON1-7`, lado conector del corte 2 (punto F) | `/WAIT` |
+
+Se usan las compuertas 3 y 4 porque quedan todas del mismo lado del integrado,
+junto al pin 14 de VCC: el puente del 11 al 10 es entre pines vecinos. Las
+entradas de una NAND son intercambiables, así que el 9 y el 10 pueden ir al
+revés.
 
 `/WAIT` baja cuando el MSX accede a los puertos del cartucho (`IOSEL_H` en
 alto) **y** el firmware tiene `PC3` en alto. El firmware lo suelta bajando
 `PC3`.
 
-**Pull-up del pin 3:** 4K7 de VCC (el propio pin 14 de U6 sirve) al pin 3.
-Hace falta porque la salida es de colector abierto: sin la resistencia, el pin
-3 nunca sube y la compuerta 2 nunca se entera del acceso. El pin 6 **no** lleva
-pull-up: la placa madre del MSX ya lo tiene en `/WAIT`.
+**Pull-up del pin 11:** 4K7 de VCC (el propio pin 14 de U6, tres pines más
+allá) al pin 11. Hace falta porque la salida es de colector abierto: sin la
+resistencia, el pin 11 nunca sube y la compuerta de `/WAIT` nunca se entera del
+acceso. El pin 8 **no** lleva pull-up: la placa madre del MSX ya lo tiene en
+`/WAIT`.
 
-**Compuertas 3 y 4, sin usar:** pines 9, 10, 12 y 13 a GND; las salidas 8 y 11
+**Compuertas 1 y 2, sin usar:** pines 1, 2, 4 y 5 a GND; las salidas 3 y 6
 quedan al aire. Quedan disponibles para `/BUSDIR`, que por ahora no se hace.
 
 **Por qué `/WAIT` en colector abierto:** es una línea compartida con pull-up en
@@ -181,11 +187,11 @@ Antes de enchufarlo, con el téster en continuidad:
 - [ ] `CON1-7` **ya no** tiene continuidad con `U5` pin 15 (corte 2)
 - [ ] `U5` pin 15 **sí** tiene continuidad con `U2` pin 19 y con el ATmega pin 23
 - [ ] 10 K entre el ATmega pin 26 y GND
-- [ ] `U6` pin 14 a VCC, pin 7 a GND; pines 9, 10, 12 y 13 a GND
-- [ ] `U6` pines 1 y 2 con continuidad a `U5` pin 15
-- [ ] `U6` pin 4 con continuidad al pin 3, y 4K7 entre el pin 3 y VCC
-- [ ] `U6` pin 5 con continuidad al ATmega pin 26
-- [ ] `U6` pin 6 con continuidad a `CON1-7`
+- [ ] `U6` pin 14 a VCC, pin 7 a GND; pines 1, 2, 4 y 5 a GND
+- [ ] `U6` pines 12 y 13 con continuidad a `U5` pin 15
+- [ ] `U6` pin 10 con continuidad al pin 11, y 4K7 entre el pin 11 y VCC
+- [ ] `U6` pin 9 con continuidad al ATmega pin 26
+- [ ] `U6` pin 8 con continuidad a `CON1-7`
 - [ ] No hay continuidad entre VCC y GND
 
 ---

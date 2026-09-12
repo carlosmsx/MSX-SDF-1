@@ -43,6 +43,8 @@
 #   make flash      graba el firmware por ICSP
 #   make clean      borra out/
 #   make check      solo verifica que estan las herramientas
+#   make icsp       comprueba la conexion ICSP con el ATmega, sin escribir
+#   make mapas      regenera los SVG de hardware/rev1 desde los Gerbers
 
 DRIVER   := diskrom/DSKDRV.MAC
 KIT      := build
@@ -74,7 +76,7 @@ DATA_ORG := F237h
 REL_KIT  := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES)))
 REL_KIT2 := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES2)))
 
-.PHONY: all rom firmware fuses flash clean check check-rom check-firmware
+.PHONY: all rom firmware fuses flash clean check check-rom check-firmware icsp mapas
 
 all: rom firmware
 
@@ -233,3 +235,35 @@ fuses:
 # borrado porque el fuse EESAVE esta programado (eeprom=keep).
 flash: $(FW_HEX)
 	"$(AVRDUDE)" -C "$(AVRDUDE_CONF)" -c $(PROGRAMMER) -p $(AVR_PART) -U flash:w:$(FW_HEX):i
+
+# Comprueba la conexion ICSP sin escribir nada: lee la firma, los fuses y el
+# lock. Si contesta, el cableado esta bien; los fuses del SDF-1 son
+# lfuse F7, hfuse D7, efuse FD. Si dice "target does not answer", revisar el
+# cable, la alimentacion, el RESET y el modulo de SD (CORRECCIONES.md paso 1).
+# Para comparar ademas la flash con el firmware compilado:
+#   make icsp ICSP_EXTRA="-U flash:v:$(FW_HEX):i"
+ICSP_EXTRA ?=
+
+icsp:
+	"$(AVRDUDE)" -C "$(AVRDUDE_CONF)" -c $(PROGRAMMER) -p $(AVR_PART) -U lfuse:r:-:h -U hfuse:r:-:h -U efuse:r:-:h -U lock:r:-:h $(ICSP_EXTRA)
+
+# ===================== Mapas del PCB (hardware/rev1) =====================
+#
+# Los dos SVG de hardware/rev1 son derivados, igual que el BOM o el netlist:
+# salen de los Gerbers, del archivo de test que viene adentro del ZIP y del
+# netlist. Si se regeneran los Gerbers, se regeneran tambien estos, en el
+# mismo commit (ver hardware/README.md).
+#
+# Los puntos de corte de cortes-rev1.svg estan fijos en el script. Con Gerbers
+# nuevos, revisalos antes de regenerar:
+#   python tools/mapa_cortes.py hardware/rev1 --analizar
+
+REV1 := hardware/rev1
+
+mapas: $(REV1)/cortes-rev1.svg $(REV1)/senales-rev1.svg
+
+$(REV1)/cortes-rev1.svg: tools/mapa_cortes.py tools/placa.py $(REV1)/sdf1-gerbers.zip
+	$(PYTHON) tools/mapa_cortes.py $(REV1) $@
+
+$(REV1)/senales-rev1.svg: tools/mapa_senales.py tools/placa.py $(REV1)/sdf1-gerbers.zip $(REV1)/sdf1.net
+	$(PYTHON) tools/mapa_senales.py $(REV1) $@

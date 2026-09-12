@@ -15,6 +15,10 @@ mismo commit.
 
 Un derivado desactualizado es peor que no tenerlo: el que lo lea le va a creer.
 
+Los mapas SVG de cada revisión (`cortes-rev1.svg`, `senales-rev1.svg`) también
+son derivados: salen de los Gerbers y del netlist con `make mapas`, y se
+regeneran en el mismo commit que ellos.
+
 Los nombres no llevan fecha ni versión a propósito — la revisión la da la
 carpeta y la historia la lleva git. Así un cambio se ve como un diff y no como
 un archivo nuevo.

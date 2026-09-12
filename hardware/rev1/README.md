@@ -11,8 +11,8 @@ Primera tanda fabricada. **Requiere correcciones a mano**: ver
 | `sdf1-bom.csv` | Lista de componentes |
 | `sdf1.net` | Netlist Protel. Conectividad en formato abierto, legible sin el CAD |
 | `CORRECCIONES.md` | Las correcciones a mano de esta revisión |
-| `cortes-rev1.svg` | Dónde cortar y soldar para las correcciones, sacado de los Gerbers |
-| `senales-rev1.svg` | Qué señal llega a cada pad (bus del MSX, H1, ATmega), para usar la placa sin los integrados |
+| `cortes-rev1.svg` | Dónde cortar y soldar para las correcciones, sacado de los Gerbers (`make mapas`) |
+| `senales-rev1.svg` | Qué señal llega a cada pad (bus del MSX, H1, ATmega), para usar la placa sin los integrados (`make mapas`) |
 
 ## Cómo pedir el PCB
 

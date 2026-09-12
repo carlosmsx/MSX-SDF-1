@@ -173,7 +173,7 @@ necesita, es un uso perfectamente legítimo y no una versión mutilada.
 | [`sdf-1-atmega328p/`](sdf-1-atmega328p/) | Firmware del ATmega328P |
 | [`firmware/`](firmware/) | El `.hex` compilado, para grabar sin toolchain |
 | [`hardware/`](hardware/) | Una carpeta por revisión de PCB: fuente EasyEDA, Gerbers, esquemático, BOM |
-| [`tools/`](tools/) | `mkrom.py`, que arma la imagen de EEPROM |
+| [`tools/`](tools/) | `mkrom.py`, que arma la imagen de EEPROM, y los scripts que dibujan los mapas del PCB (`make mapas`) |
 | `build/` | **No está en el repo** — ver abajo |
 
 ## Compilar
@@ -182,6 +182,7 @@ necesita, es un uso perfectamente legítimo y no una versión mutilada.
     make rom        solo la DiskROM     -> out/sdf1.rom
     make firmware   solo el firmware    -> out/firmware/
     make check      verifica que estén las herramientas
+    make mapas      los mapas SVG de hardware/rev1, desde los Gerbers
 
 ### Para la DiskROM
 

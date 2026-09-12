@@ -45,6 +45,12 @@
 #   make check      solo verifica que estan las herramientas
 #   make icsp       comprueba la conexion ICSP con el ATmega, sin escribir
 #   make mapas      regenera los SVG de hardware/rev1 desde los Gerbers
+#
+# Anda igual desde Git Bash que desde PowerShell o cmd. Sin sh en el PATH,
+# make corre las recetas con cmd.exe, asi que aca no hay sintaxis de sh
+# (test, mkdir -p, rm -rf, VAR=valor delante de un comando, $$(...), lineas
+# partidas con \). Los chequeos van con funciones de make y lo que toca
+# carpetas va con python, que ya es dependencia por mkrom.py.
 
 DRIVER   := diskrom/DSKDRV.MAC
 KIT      := build
@@ -85,15 +91,16 @@ rom: $(OUT)/sdf1.rom
 check: check-rom check-firmware
 
 check-rom:
-	@test -x $(N80)  || { echo "falta $(N80) — ver el encabezado de este Makefile"; exit 1; }
-	@test -x $(LK80) || { echo "falta $(LK80) — ver el encabezado de este Makefile"; exit 1; }
-	@test -f $(KIT)/DOSHEAD.REL || { echo "falta el MSX-DOS kit en $(KIT)/"; exit 1; }
-	@echo "N80  $$($(N80) --version)"
-	@echo "LK80 $$($(LK80) --version)"
-	@echo "kit  $(words $(MODULES) $(MODULES2)) modulos en $(KIT)/"
+	$(if $(wildcard $(N80)),,$(error falta $(N80) — ver el encabezado de este Makefile))
+	$(if $(wildcard $(LK80)),,$(error falta $(LK80) — ver el encabezado de este Makefile))
+	$(if $(wildcard $(KIT)/DOSHEAD.REL),,$(error falta el MSX-DOS kit en $(KIT)/))
+	$(info N80  $(shell $(N80) --version))
+	$(info LK80 $(shell $(LK80) --version))
+	$(info kit  $(words $(MODULES) $(MODULES2)) modulos en $(KIT)/)
 
+# python y no mkdir -p: desde cmd, "mkdir -p out" crea tambien una carpeta "-p".
 $(OUT):
-	@mkdir -p $(OUT)
+	@$(PYTHON) -c "import os; os.makedirs('$(OUT)', exist_ok=True)"
 
 # --- 1. Ensamblar el driver ---------------------------------------------
 # -bt rel: relocalizable formato M80, que es lo que espera LK80.
@@ -110,10 +117,14 @@ $(OUT)/DSKDRV.REL: $(DRIVER) | $(OUT)
 # --code y --data son "link sequence items": aplican al archivo siguiente,
 # por eso van antes del primer .REL. --data ademas pone el linker en modo
 # "codigo y datos separados", que es el equivalente del /d: de L80.
+#
+# Los argumentos van en una variable para que la receta sea una sola linea:
+# cmd no entiende las lineas de receta partidas con \.
+LK80_ARGS = --code $(CODE_ORG) --data $(DATA_ORG) \
+            $(REL_KIT) $(OUT)/DSKDRV.REL $(REL_KIT2) \
+            --output-format hex --output-file
 $(OUT)/msxdos.hex: $(OUT)/DSKDRV.REL
-	$(LK80) --code $(CODE_ORG) --data $(DATA_ORG) \
-	        $(REL_KIT) $(OUT)/DSKDRV.REL $(REL_KIT2) \
-	        --output-format hex --output-file $@
+	$(LK80) $(LK80_ARGS) $@
 
 # --- 3. Armar la imagen de EEPROM ---------------------------------------
 # Ubica el codigo, rellena los 64 KB con FF y verifica la firma "AB".
@@ -121,7 +132,7 @@ $(OUT)/sdf1.rom: $(OUT)/msxdos.hex tools/mkrom.py
 	$(PYTHON) tools/mkrom.py $< $@
 
 clean:
-	rm -rf $(OUT)
+	@$(PYTHON) -c "import shutil; shutil.rmtree('$(OUT)', ignore_errors=True)"
 
 # ======================= Firmware (ATmega328P) =========================
 #
@@ -137,11 +148,13 @@ SKETCH   := sdf-1-atmega328p
 FW_OUT   := $(OUT)/firmware
 FW_HEX   := $(FW_OUT)/$(SKETCH).ino.hex
 
-# cygpath traduce las variables de entorno de Windows a un formato que
-# entienden tanto make como los .exe. Si compilas en Linux/macOS, pasa
-# ARDUINO_DATA y ARDUINO_USER a mano.
-WINHOME  := $(shell cygpath -m "$$USERPROFILE" 2>/dev/null || echo "$$HOME")
-WINLOCAL := $(shell cygpath -m "$$LOCALAPPDATA" 2>/dev/null || echo "$$HOME/.local/share")
+# Las carpetas del usuario salen de las variables de entorno de Windows,
+# leidas por make mismo y con las barras dadas vuelta. Nada de $(shell): desde
+# PowerShell o cmd make no tiene sh ni cygpath, y un $(shell cygpath ...) deja
+# las rutas vacias sin avisar. En Linux/macOS caen en $HOME; si hace falta,
+# pasa ARDUINO_DATA y ARDUINO_USER a mano.
+WINHOME  := $(if $(USERPROFILE),$(subst \,/,$(USERPROFILE)),$(HOME))
+WINLOCAL := $(if $(LOCALAPPDATA),$(subst \,/,$(LOCALAPPDATA)),$(HOME)/.local/share)
 
 ARDUINO_CLI  ?= C:/Program Files/Arduino IDE/resources/app/lib/backend/resources/arduino-cli.exe
 ARDUINO_DATA ?= $(WINLOCAL)/Arduino15
@@ -185,29 +198,34 @@ AVRDUDE_CONF ?= $(dir $(AVRDUDE))../etc/avrdude.conf
 # firma no coincide con la del modelo que le pasas.
 AVR_PART := $(if $(findstring variant=modelNonP,$(FQBN)),m328,m328p)
 
-# Las tres cosas que necesita el .exe para encontrar cores y librerias.
-ACLI = ARDUINO_DIRECTORIES_DATA="$(ARDUINO_DATA)" \
-       ARDUINO_DIRECTORIES_USER="$(ARDUINO_USER)" \
-       "$(ARDUINO_CLI)"
+# Las dos carpetas que necesita el .exe para encontrar cores y librerias. Van
+# con export y no como VAR=valor delante del comando: eso es sintaxis de sh, y
+# desde PowerShell o cmd make no tiene sh.
+export ARDUINO_DIRECTORIES_DATA = $(ARDUINO_DATA)
+export ARDUINO_DIRECTORIES_USER = $(ARDUINO_USER)
+ACLI = "$(ARDUINO_CLI)"
+
+# Version del arduino-cli; queda vacia si no lo encuentra. Sirve tambien de
+# chequeo de que existe: la ruta tiene espacios y $(wildcard) no la maneja.
+ACLI_VERSION = $(shell $(ACLI) version)
 
 firmware: $(FW_HEX)
 
 $(FW_HEX): $(SKETCH)/$(SKETCH).ino $(SKETCH)/defs.h
-	@mkdir -p $(FW_OUT)
 	$(ACLI) compile -b "$(FQBN)" --output-dir $(FW_OUT) ./$(SKETCH)
 
 check-firmware:
-	@test -x "$(ARDUINO_CLI)" || { echo "falta arduino-cli en '$(ARDUINO_CLI)'"; exit 1; }
-	@test -d "$(ARDUINO_DATA)/packages/MiniCore" || { echo "falta MiniCore en $(ARDUINO_DATA)"; exit 1; }
-	@test -d "$(ARDUINO_USER)/libraries" || { echo "no encuentro el sketchbook (ARDUINO_USER)"; exit 1; }
-	@test -x "$(AVRDUDE)" || { echo "falta avrdude en $(ARDUINO_DATA)/packages — ver AVRDUDE"; exit 1; }
-	@test -f "$(AVRDUDE_CONF)" || { echo "falta avrdude.conf en '$(AVRDUDE_CONF)'"; exit 1; }
-	@echo "cli   $$($(ACLI) version)"
-	@echo "data  $(ARDUINO_DATA)"
-	@echo "user  $(ARDUINO_USER)"
-	@echo "fqbn  $(FQBN)"
-	@echo "dude  $(AVRDUDE)"
-	@echo "part  $(AVR_PART) con $(PROGRAMMER)"
+	$(if $(ACLI_VERSION),,$(error falta arduino-cli en '$(ARDUINO_CLI)'))
+	$(if $(wildcard $(ARDUINO_DATA)/packages/MiniCore),,$(error falta MiniCore en $(ARDUINO_DATA)))
+	$(if $(wildcard $(ARDUINO_USER)/libraries),,$(error no encuentro el sketchbook: pasa ARDUINO_USER a mano))
+	$(if $(AVRDUDE),,$(error falta avrdude en $(ARDUINO_DATA)/packages — ver AVRDUDE))
+	$(if $(wildcard $(AVRDUDE_CONF)),,$(error falta avrdude.conf en '$(AVRDUDE_CONF)'))
+	$(info cli   $(ACLI_VERSION))
+	$(info data  $(ARDUINO_DATA))
+	$(info user  $(ARDUINO_USER))
+	$(info fqbn  $(FQBN))
+	$(info dude  $(AVRDUDE))
+	$(info part  $(AVR_PART) con $(PROGRAMMER))
 
 # ---- Grabado por ICSP -------------------------------------------------
 #

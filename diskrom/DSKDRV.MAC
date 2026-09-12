@@ -19,6 +19,10 @@ CHRGTR  	EQU     04666H
 VALTYP  	EQU     0F663H
 USR     	EQU     0F7F8H
 PROCNM		EQU		0FD89H
+BREAKX		EQU		000B7H
+GETBYT		EQU		0521CH
+LINLEN		EQU		0F3B0H
+CSRX		EQU		0F3DDH
 ;ENASLT  	EQU     00024H          ;enable slot
 ;RSLREG  	EQU     00138H          ;read primary slot select register
 ;RSLGREG 	EQU		00138H
@@ -94,9 +98,22 @@ MYSIZE		equ	1		; Size of environment
 SECLEN		equ	512		; Size of biggest sector
 
 ;----Commands----
+;Agrupados por funcion, un nibble alto por grupo (ver defs.h del firmware):
+;  0DxH diagnostico, 0ExH SD e imagenes DSK, 0FxH driver de disco de MSX-DOS
+
+;Version del protocolo con el firmware: tiene que coincidir con
+;PROTOCOL_VERSION en defs.h. La compara CALL SDFTEST.
+PROTOCOL	EQU		1
+
+;0DxH: diagnostico
 CMD_DEBUG	EQU		0D0H
-CMD_SENDSTR	EQU		0E0H
-CMD_FSAVE	EQU		0E1H
+CMD_SDFTEST	EQU		0D1H
+;0ExH: SD e imagenes DSK
+CMD_SENDSTR	EQU		0E0H	;de antes de agrupar; hoy no lo usa nadie
+CMD_SDFMOUNT	EQU		0E1H
+CMD_SDFFILES	EQU		0E2H
+CMD_SDFUMOUNT	EQU		0E3H
+;0FxH: driver de disco de MSX-DOS
 CMD_WRITE	EQU		0F0H
 CMD_READ	EQU		0F1H
 CMD_INIHRD	EQU		0F2H
@@ -130,6 +147,12 @@ WriteBlock:
 	EX		(SP),HL
 	EX		(SP),HL
 	JR		NZ,WriteBlock
+	RET
+
+ReadByte:
+	IN		A,(PORT_DATA)
+	EX		(SP),HL
+	EX		(SP),HL
 	RET
 
 ReadBlock:
@@ -250,6 +273,9 @@ WRITE:
 	CALL	WriteByte
 	LD		A,E				;sec Lo
 	CALL	WriteByte
+	CALL	ReadByte		;estado: 0 ok, si no el error de DSKIO
+	OR		A
+	JR		NZ,DSKIOERROR
 	LD		D,B				;store n-sectors ;/\
 WRSEC:
 	PUSH	BC				;only B matters
@@ -263,6 +289,10 @@ WRSEC:
 	CCF						;no errors
 	RET
 	
+DSKIOERROR:
+	SCF						;A=error code, B=remaining sectors (todos)
+	RET
+
 READ:
 	LD		A,CMD_READ		;read
 	CALL	WriteCommand
@@ -280,6 +310,9 @@ READ:
 	CALL	WriteByte
 	LD		A,E				;sec L
 	CALL	WriteByte
+	CALL	ReadByte		;estado: 0 ok, si no el error de DSKIO
+	OR		A
+	JR		NZ,DSKIOERROR
 RDSEC:
 	PUSH	BC				;only B matters
 	LD		BC,0			;B=0 to count until 256 bytes, C=0 for INI
@@ -332,8 +365,16 @@ DSKCHG:
 	LD		A,CMD_DSKCHG
 	CALL	WriteCommand
 	POP		AF
-	OR		A
-	LD		B,1
+	CALL	WriteByte		;drive number
+	CALL	ReadByte		;01 sin cambio, FF cambiado por CALL SDFMOUNT
+	LD		B,A
+	INC		A
+	JR		NZ,.NOCHANGE
+	PUSH	BC
+	CALL	GETDPB			;con FF, DOS1 espera el DPB actualizado en [HL]
+	POP		BC
+.NOCHANGE:
+	OR		A				;no errors
 	RET
 
 ; GETDPB
@@ -485,10 +526,18 @@ GETPREVCHAR:
 CMDS:
 ; List of available commands (as ASCIIZ) and execute address (as word)
 
+	;diagnostico
 	DEFB	"FFILES",0
 	DEFW	_FFILES
-	DEFB	"FSAVE",0
-	DEFW	_FSAVE
+	DEFB	"SDFTEST",0
+	DEFW	_SDFTEST
+	;SD e imagenes DSK
+	DEFB	"SDFFILES",0
+	DEFW	_SDFFILES
+	DEFB	"SDFMOUNT",0
+	DEFW	_SDFMOUNT
+	DEFB	"SDFUMOUNT",0
+	DEFW	_SDFUMOUNT
 	DEFB	0               ; No more commands
 
 PRINTHEX:
@@ -546,12 +595,187 @@ _FFILES:
 	OR		A
 	RET
 
-_FSAVE:
-	;CALL	_STRCMD
-	LD		A,CMD_FSAVE
+; CALL SDFFILES
+;
+; Lista los .DSK de la raiz de la SD, en columnas de 13 caracteres.
+; El firmware manda los nombres 8.3 como ASCIIZ, uno detras del otro, y un
+; nombre vacio al final. CTRL+STOP corta el listado.
+
+_SDFFILES:
+	PUSH	HL
+	LD		A,CMD_SDFFILES
 	CALL	WriteCommand
+.NEXTDSK:
+	CALL	ReadByte
+	OR		A
+	JR		Z,.ENDLIST		;nombre vacio: no hay mas
+	LD		C,A				;primer caracter del nombre
+	LD		A,(CSRX)		;columna del cursor, 1 = margen izquierdo
+	ADD		A,12			;columna donde terminaria la entrada
+	LD		B,A
+	LD		A,(LINLEN)
+	CP		B
+	CALL	C,CRLF			;no entra en lo que queda de la linea
+	LD		B,13			;ancho de la columna
+	LD		A,C
+.DSKCHAR:
+	CALL	CHPUT
+	DEC		B
+	CALL	ReadByte
+	OR		A
+	JR		NZ,.DSKCHAR
+.PADDING:
+	LD		A,' '			;relleno hasta el ancho de la columna
+	CALL	CHPUT
+	DJNZ	.PADDING
+	CALL	BREAKX			;CTRL+STOP?
+	JR		NC,.NEXTDSK
+.ENDLIST:
+	LD		A,(CSRX)
+	DEC		A
+	CALL	NZ,CRLF			;cierro la ultima linea si quedo a medias
+	POP		HL
 	OR		A
 	RET
+
+; CALL SDFMOUNT(drive, "archivo")
+;
+; Monta una imagen DSK de la raiz de la SD en el drive indicado, 0=A 1=B.
+; El firmware valida el pedido y contesta 0 si la monto, o directamente el
+; numero de error de BASIC a mostrar: asi la ROM no carga con los mensajes.
+
+_SDFMOUNT:
+	CALL	CHKCHAR
+	DEFB	"("             ; Check for (
+	LD		IX,GETBYT		;evalua el drive, 0-255 en A
+	CALL	CALBAS
+	PUSH	AF
+	CALL	CHKCHAR
+	DEFB	","             ; Check for ,
+	LD		IX,FRMEVL		;evalua el nombre
+	CALL	CALBAS
+	LD      A,(VALTYP)
+	CP      3               ; Text type?
+	JP      NZ,TYPE_MISMATCH
+	CALL	CHKCHAR
+	DEFB	")"             ; Check for )
+	POP		AF				;drive
+	PUSH	HL				;puntero de BASIC
+	PUSH	AF
+	LD		A,CMD_SDFMOUNT
+	CALL	WriteCommand
+	POP		AF
+	CALL	WriteByte		;drive
+	CALL	GETSTRPNT		;HL=nombre, B=largo
+	LD		A,B
+	CALL	WriteByte		;largo
+	OR		A
+	JR		Z,SDFRESULT
+.SENDNAME:
+	LD		A,(HL)
+	CALL	WriteByte
+	INC		HL
+	DJNZ	.SENDNAME
+SDFRESULT:							;final comun de SDFMOUNT y SDFUMOUNT
+	CALL	ReadByte		;0=ok, si no el numero de error de BASIC
+	POP		HL				;puntero de BASIC
+	OR		A
+	RET		Z
+	LD		E,A
+	LD		IX,ERRHAND		; Call the Basic error handler
+	JP		CALBAS
+
+; CALL SDFUMOUNT(drive)
+;
+; Desmonta la imagen del drive indicado, 0=A 1=B. El drive queda vacio, tambien
+; despues de apagar, y el DOS contesta "Disk offline" hasta el proximo SDFMOUNT.
+
+_SDFUMOUNT:
+	CALL	CHKCHAR
+	DEFB	"("             ; Check for (
+	LD		IX,GETBYT		;evalua el drive, 0-255 en A
+	CALL	CALBAS
+	PUSH	AF
+	CALL	CHKCHAR
+	DEFB	")"             ; Check for )
+	POP		AF				;drive
+	PUSH	HL				;puntero de BASIC
+	PUSH	AF
+	LD		A,CMD_SDFUMOUNT
+	CALL	WriteCommand
+	POP		AF
+	CALL	WriteByte		;drive
+	JR		SDFRESULT
+
+; CALL SDFTEST
+;
+; Diagnostico: verifica que el firmware conteste y que hable el mismo
+; protocolo que esta ROM, y muestra su version. El firmware manda un byte con
+; su protocolo y despues la version como ASCIIZ.
+
+_SDFTEST:
+	PUSH	HL
+	LD		A,CMD_SDFTEST
+	CALL	WriteCommand
+	CALL	ReadByte		;version del protocolo del firmware
+	LD		HL,S_NOANSWER
+	CP		0FFH			;bus flotando: nadie atiende el puerto
+	JR		Z,.TESTMSG
+	LD		HL,S_OLDFW
+	OR		A				;firmware sin CMD_SDFTEST: contesta 0
+	JR		Z,.TESTMSG
+	LD		C,A				;protocolo del firmware
+	LD		HL,S_FIRMWARE
+	CALL	PRINTSTR
+	LD		B,32			;tope, por si llega basura sin el 0 final
+.VERCHAR:
+	CALL	ReadByte
+	OR		A
+	JR		Z,.VEREND
+	CALL	CHPUT
+	DJNZ	.VERCHAR
+.VEREND:
+	LD		HL,S_PROTOCOL
+	CALL	PRINTSTR
+	LD		A,C
+	CALL	PRINTHEX
+	CALL	CRLF			;pisa A
+	LD		A,C
+	CP		PROTOCOL
+	JR		Z,.TESTOK
+	LD		HL,S_MISMATCH
+.TESTMSG:
+	CALL	PRINTSTR
+.TESTOK:
+	POP		HL
+	OR		A
+	RET
+
+S_NOANSWER:
+	DB		"El firmware no responde (sin SD?)",13,10,0
+S_OLDFW:
+	DB		"Firmware anterior a SDFTEST",13,10,0
+S_FIRMWARE:
+	DB		"Firmware ",0
+S_PROTOCOL:
+	DB		13,10,"Protocolo ",0
+S_MISMATCH:
+	DB		"Distinto al de la ROM!",13,10,0
+
+; Imprime el ASCIIZ apuntado por HL
+PRINTSTR:
+	LD		A,(HL)
+	OR		A
+	RET		Z
+	CALL	CHPUT
+	INC		HL
+	JR		PRINTSTR
+
+CRLF:
+	LD		A,13
+	CALL	CHPUT
+	LD		A,10
+	JP		CHPUT
 	
 ; MTOFF
 ;
@@ -626,6 +850,7 @@ CHKCHAR:
 	INC		HL
 	EX		(SP),HL
 	INC		HL				; Get next basic char
+	JP		GETPREVCHAR		;sin esto caia en TYPE_MISMATCH
 
 TYPE_MISMATCH:
 	LD      E,13

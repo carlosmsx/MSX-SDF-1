@@ -15,7 +15,7 @@ arranca MSX-DOS y Disk BASIC desde imágenes `.DSK` guardadas en la tarjeta, y
 para el MSX es una disketera común.
 
 > **Estado: en desarrollo.** La rev1 está fabricada y **requiere correcciones a
-> mano** antes de funcionar — ver [hardware/rev1/BODGES.md](hardware/rev1/BODGES.md).
+> mano** antes de funcionar — ver [hardware/rev1/CORRECCIONES.md](hardware/rev1/CORRECCIONES.md).
 > No es todavía un proyecto "armalo y andá".
 
 ## Las decisiones de diseño
@@ -77,15 +77,15 @@ al ATmega tienen que llegar exactamente cuatro señales:
 | PC0 | Selección decodificada (`U5.Y0`) | Despierta al micro — es `PCINT8`, el disparo del handshake |
 | PC1 | `A0` del MSX | Distingue el registro de datos del de comando |
 | PC2 | `/RD` del MSX | Dice si el ciclo es lectura o escritura |
-| PC3 | Habilitación del decodificador | **Salida**: es con lo que el micro libera el `/WAIT` |
+| PC3 | Llave del `/WAIT` | **Salida**: es con lo que el micro libera el `/WAIT` |
 
 **El `/WAIT`, en colector abierto.** `/WAIT` es una línea *wired-OR* del bus:
 todos los cartuchos la comparten y ninguno debe manejarla en totem-pole. La
 salida de un '138 atacándola directamente entra en contención con cualquier otra
 placa que la tire a bajo. Acá el `/WAIT` sale por una compuerta NAND de colector
 abierto (74LS03): el cartucho **sólo puede tirar la línea a bajo**, nunca
-forzarla a alto. Lo mismo vale para `/BUSDIR`. En la rev1 es el bodge del paso 3
-de [BODGES.md](hardware/rev1/BODGES.md); en la rev2 va en el PCB.
+forzarla a alto. En la rev1 es la corrección del paso 4 de
+[CORRECCIONES.md](hardware/rev1/CORRECCIONES.md); en la rev2 va en el PCB.
 
 **El mismo micro que usa un Arduino, pero suelto y a 20 MHz.** No hay una placa
 Arduino adentro del cartucho: es el ATmega328P pelado, soldado al PCB, con su
@@ -145,6 +145,12 @@ conector **H1**:
 
 (En la rev1 ese header **no está serigrafiado**; el pinout sale del netlist y es
 el de arriba.)
+
+El mapa [`hardware/rev1/senales-rev1.svg`](hardware/rev1/senales-rev1.svg) muestra
+qué señal llega a cada pad de la placa, H1 incluido. Con los zócalos vacíos, los
+pads de los integrados sirven para tomar el bus del MSX: A0–A15, D0–D7, `/RD`,
+`/IORQ`, `/M1`, `/SLTSL`, `/WAIT`, +5 V y GND. `/WR`, `/MREQ`, `/RESET`, `/INT`,
+`/BUSDIR` y CLOCK **no llegan a ningún pad**: hay que cablearlas desde el conector.
 
 La mejor prueba de que la placa es genérica está en la placa misma: **el propio
 módulo de SD se conecta en la zona experimental**, colgado de H1 igual que lo
@@ -211,9 +217,9 @@ el sketch usa `SPI_FULL_SPEED` y el typedef `File`.
     make fuses      una vez por chip
     make flash      el firmware, por ICSP
 
-Requiere el cable de RESET del paso 5 de
-[BODGES.md](hardware/rev1/BODGES.md), y desenchufar el módulo de SD antes de
-grabar. Los detalles están en [firmware/README.md](firmware/README.md).
+Requiere el cable de RESET del paso 1 de
+[CORRECCIONES.md](hardware/rev1/CORRECCIONES.md), y desenchufar el módulo de SD
+antes de grabar. Los detalles están en [firmware/README.md](firmware/README.md).
 
 ## Licencia
 

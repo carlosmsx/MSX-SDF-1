@@ -49,9 +49,35 @@
 
 
 // Algunas definiciones para comunicar con el driver en MSX
+//
+// Los codigos se agrupan por funcion, un nibble alto por grupo. Un grupo
+// nuevo toma un nibble libre; no se mezclan comandos de grupos distintos.
+//   0xDx  diagnostico
+//   0xEx  manejo de la SD y de las imagenes DSK (CALL SDF...)
+//   0xFx  driver de disco de MSX-DOS (las rutinas de DSKDRV.MAC)
+// Tienen que coincidir con los EQU de DSKDRV.MAC.
+
+// Version del firmware, la muestra CALL SDFTEST. La fecha de compilacion
+// distingue dos grabaciones de la misma version.
+#define FW_VERSION        "0.1 " __DATE__
+
+// Version del protocolo con la ROM, tambien la compara CALL SDFTEST. Sube
+// cuando un cambio obliga a grabar ROM y firmware juntos; tiene que coincidir
+// con PROTOCOL en DSKDRV.MAC.
+//   1 = byte de estado en READ/WRITE, SDFFILES/SDFMOUNT/SDFUMOUNT, SDFTEST
+#define PROTOCOL_VERSION  1
+
+// 0xDx: diagnostico
 #define CMD_DEBUG     0xD0
-#define CMD_SENDSTR   0xE0
-#define CMD_FSAVE     0xE1
+#define CMD_SDFTEST   0xD1
+
+// 0xEx: SD e imagenes DSK
+#define CMD_SENDSTR   0xE0  //de antes de agrupar; hoy no lo usa nadie
+#define CMD_SDFMOUNT  0xE1
+#define CMD_SDFFILES  0xE2
+#define CMD_SDFUMOUNT 0xE3
+
+// 0xFx: driver de disco de MSX-DOS
 #define CMD_WRITE     0xF0
 #define CMD_READ      0xF1
 #define CMD_INIHRD    0xF2
@@ -73,6 +99,36 @@
 #define CMD_PARAM__ADDR_L         6
 #define CMD_ST__READING_SEC       10
 #define CMD_ST__READ_CRC          11
+#define CMD_ST__IO_STATUS         12
 #define CMD_ST__WRITING_SEC       20
+#define CMD_SDFMOUNT__DRIVE       30
+#define CMD_SDFMOUNT__LENGTH      31
+#define CMD_SDFMOUNT__NAME        32
+#define CMD_SDFMOUNT__RESULT      33
+#define CMD_SDFUMOUNT__DRIVE      34
+#define CMD_SDFUMOUNT__RESULT     35
+#define CMD_DSKCHG__DRIVE_NUMBER  40
+#define CMD_DSKCHG__STATUS        41
+
+// Respuesta de CMD_SDFMOUNT: 0 si monto, si no el numero de error de BASIC
+// que muestra el MSX. Asi la ROM no necesita una tabla de mensajes.
+#define ERR_FILE_NOT_FOUND        53
+#define ERR_BAD_FILE_NAME         56
+#define ERR_BAD_FILE_MODE         61  //la imagen no es de 720 KB
+#define ERR_BAD_DRIVE_NAME        62
+
+// Unico formato que conoce GETDPB en la ROM: 3,5" doble faz, 80 pistas.
+#define DSK_720K_SIZE             737280UL
+#define DSK_NAME_LEN              13  //nombre 8.3 mas el 0 final
+
+// Byte de estado de CMD_READ y CMD_WRITE, antes de los sectores: 0 si se
+// puede, si no el codigo de error que DSKIO le devuelve al DOS.
+#define DSKIO_ERR_NOT_READY         2 //drive sin imagen, o la imagen ya no esta
+#define DSKIO_ERR_RECORD_NOT_FOUND  8 //sector fuera de la imagen
+
+// EEPROM: las imagenes montadas en A y B, para que sobrevivan al apagado.
+#define EEPROM_MAGIC_ADDR         0
+#define EEPROM_MAGIC              0x5D  //si cambia el formato, cambiar esto
+#define EEPROM_MOUNTED_ADDR       1     //DSK_NAME_LEN bytes por drive, A y B
 
 #endif

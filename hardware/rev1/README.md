@@ -1,7 +1,7 @@
 # SDF-1 rev1 (v1.1)
 
-Primera tanda fabricada. **Requiere correcciones a mano**: ver [BODGES.md](BODGES.md)
-antes de armar o de enchufar la placa.
+Primera tanda fabricada. **Requiere correcciones a mano**: ver
+[CORRECCIONES.md](CORRECCIONES.md) antes de armar o de enchufar la placa.
 
 | Archivo | Qué es |
 |---|---|
@@ -10,7 +10,9 @@ antes de armar o de enchufar la placa.
 | `sdf1-sch.pdf` | Esquemático, para leer y depurar sin instalar el CAD |
 | `sdf1-bom.csv` | Lista de componentes |
 | `sdf1.net` | Netlist Protel. Conectividad en formato abierto, legible sin el CAD |
-| `BODGES.md` | Las correcciones a mano de esta revisión |
+| `CORRECCIONES.md` | Las correcciones a mano de esta revisión |
+| `cortes-rev1.svg` | Dónde cortar y soldar para las correcciones, sacado de los Gerbers |
+| `senales-rev1.svg` | Qué señal llega a cada pad (bus del MSX, H1, ATmega), para usar la placa sin los integrados |
 
 ## Cómo pedir el PCB
 
@@ -50,8 +52,21 @@ oscilador o directamente impide que arranque. En C3–C8, que son de desacople,
 X7R está bien. Evitá Y5V en ambos casos: pierden más de la mitad de su
 capacidad bajo tensión de trabajo.
 
-Las resistencias que agregan los bodges (2× 4K7 y 1× 10K) conviene que sean
-**THT**, no 0603: van soldadas al aire entre patas de integrados.
+Lo que agregan las correcciones (un `74LS03`, 1× 4K7, 1× 10K y 1× 100 nF)
+conviene que sea **THT**, no 0603: va soldado al aire entre patas de
+integrados.
+
+## Error conocido del BOM: el cristal
+
+**X1 es de 20 MHz.** En `sdf1-bom.csv` el Comment y el Value dicen `20MHz`,
+pero el Manufacturer Part es `HC-49/U-S16000000ABJB`, que es el de **16 MHz**.
+Pedí el de 20 MHz: por el patrón de la familia sería `HC-49/U-S20000000ABJB`,
+pero confirmalo en LCSC antes de pedirlo. Se corrige en la rev2; no edites el
+CSV a mano, sale de `sdf1.epro2`.
+
+Un cristal de 16 MHz no da ningún síntoma claro: MiniCore usa los mismos fuses
+para 16 y 20 MHz, así que el chip arranca, la SD monta y todas las
+temporizaciones quedan un 25 % corridas. No falla, anda mal.
 
 ## Qué hace falta saber soldar
 
@@ -60,4 +75,4 @@ La placa es mixta: los integrados y los conectores son THT, pero los pasivos
 de práctica, pero conviene saberlo antes de encargar.
 
 Montá el ATmega en **zócalo torneado** hasta que exista el bootloader: hoy
-reprogramarlo sin sacarlo requiere el cable del paso 5 de BODGES.md.
+reprogramarlo sin sacarlo requiere el cable del paso 1 de CORRECCIONES.md.

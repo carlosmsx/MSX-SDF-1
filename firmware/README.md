@@ -7,7 +7,7 @@ Es codigo 100% propio: sale de `../sdf-1-atmega328p/` y de nada mas.
 
 ## Grabarlo
 
-Por ICSP, con el cable de RESET del paso 5 de `../hardware/rev1/BODGES.md`.
+Por ICSP, con el cable de RESET del paso 1 de `../hardware/rev1/CORRECCIONES.md`.
 Desenchufa el modulo de SD antes de grabar.
 
 Los fuses van UNA VEZ por chip, antes del primer grabado:

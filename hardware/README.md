@@ -5,7 +5,7 @@ documentos **de esa** revisión, aunque exista una posterior.
 
 | Revisión | Estado |
 |---|---|
-| [rev1](rev1/) | Fabricada. Requiere correcciones a mano — ver [rev1/BODGES.md](rev1/BODGES.md) |
+| [rev1](rev1/) | Fabricada. Requiere correcciones a mano — ver [rev1/CORRECCIONES.md](rev1/CORRECCIONES.md) |
 
 ## Regla para los archivos derivados
 

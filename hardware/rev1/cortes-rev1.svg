@@ -548,6 +548,7 @@
 <rect x="224.5" y="440.1" width="8.9" height="53.3" fill="#d4a017" opacity="0.55"/>
 <rect x="206.7" y="440.1" width="8.9" height="53.3" fill="#d4a017" opacity="0.55"/>
 <rect x="188.9" y="440.1" width="8.9" height="53.3" fill="#d4a017" opacity="0.55"/>
+<circle cx="210.0" cy="346.1" r="17.2" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <circle cx="603.4" cy="381.8" r="17.2" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <rect x="516.8" y="60.8" width="11.0" height="11.9" fill="#d4a017" opacity="0.55"/>
 <circle cx="540.1" cy="66.8" r="5.9" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
@@ -1340,6 +1341,7 @@
 <rect x="517.8" y="957.5" width="8.9" height="53.3" fill="#d4a017" opacity="0.55"/>
 <rect x="535.6" y="957.5" width="8.9" height="53.3" fill="#d4a017" opacity="0.55"/>
 <rect x="553.4" y="957.5" width="8.9" height="53.3" fill="#d4a017" opacity="0.55"/>
+<circle cx="541.2" cy="863.5" r="17.2" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <circle cx="147.8" cy="899.2" r="17.2" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <rect x="223.4" y="578.3" width="11.0" height="11.9" fill="#d4a017" opacity="0.55"/>
 <circle cx="211.1" cy="584.2" r="5.9" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
@@ -2136,6 +2138,7 @@
 <rect x="279.5" y="1552.1" width="21.9" height="131.7" fill="#d4a017" opacity="0.55"/>
 <rect x="323.4" y="1552.1" width="21.9" height="131.7" fill="#d4a017" opacity="0.55"/>
 <rect x="367.3" y="1552.1" width="21.9" height="131.7" fill="#d4a017" opacity="0.55"/>
+<circle cx="337.2" cy="1320.1" r="42.3" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <circle cx="-634.0" cy="1408.3" r="42.3" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <rect x="-447.3" y="615.9" width="27.2" height="29.4" fill="#d4a017" opacity="0.55"/>
 <circle cx="-477.6" cy="630.6" r="14.7" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
@@ -2945,6 +2948,7 @@
 <rect x="1310.4" y="1197.9" width="21.9" height="131.7" fill="#d4a017" opacity="0.55"/>
 <rect x="1354.3" y="1197.9" width="21.9" height="131.7" fill="#d4a017" opacity="0.55"/>
 <rect x="1398.2" y="1197.9" width="21.9" height="131.7" fill="#d4a017" opacity="0.55"/>
+<circle cx="1368.1" cy="965.9" r="42.3" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <circle cx="396.9" cy="1054.0" r="42.3" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>
 <rect x="583.6" y="261.7" width="27.2" height="29.4" fill="#d4a017" opacity="0.55"/>
 <circle cx="553.3" cy="276.4" r="14.7" fill="#c9a227" stroke="#7a6112" stroke-width="0.8" opacity="0.8"/>

@@ -851,7 +851,8 @@
 <rect x="370.5" y="762.7" width="15.2" height="91.4" fill="#d4a017" opacity="0.6"/>
 <rect x="340.0" y="762.7" width="15.2" height="91.4" fill="#d4a017" opacity="0.6"/>
 <rect x="309.6" y="762.7" width="15.2" height="91.4" fill="#d4a017" opacity="0.6"/>
-<rect x="316.3" y="572.2" width="58.8" height="58.8" fill="#d4a017" opacity="0.6"/>
+<circle cx="345.7" cy="601.6" r="29.4" fill="none" stroke="#c9a227" stroke-width="4.2" opacity="0.8"/>
+<circle cx="1020.1" cy="662.8" r="29.4" fill="none" stroke="#c9a227" stroke-width="4.2" opacity="0.8"/>
 <rect x="973.9" y="247.1" width="9.7" height="10.4" fill="#c9a227" opacity="0.5"/>
 <rect x="991.9" y="247.1" width="9.7" height="10.4" fill="#c9a227" opacity="0.5"/>
 <text x="1048.7" y="756.7" font-size="12" fill="#222" text-anchor="middle" stroke="#f4f1e8" stroke-width="3" paint-order="stroke">2</text>

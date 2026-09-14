@@ -101,6 +101,8 @@ bool nextDskName()
 
 // Verifica que name sea una imagen que la ROM sabe leer. Devuelve 0 o el
 // numero de error de BASIC; si esta bien, deja en name su nombre corto.
+// Mira solo el largo, no el byte de la FAT: una imagen de juego con cargador
+// propio, sin FAT, tambien tiene que montar.
 uint8_t checkDskImage(char *name)
 {
   if (name[0] == 0)
@@ -110,7 +112,7 @@ uint8_t checkDskImage(char *name)
   File f = SD.open(name, O_READ);
   if (!f || f.isDir() || !f.getSFN(name, DSK_NAME_LEN))
     err = ERR_FILE_NOT_FOUND;
-  else if (f.fileSize() != DSK_720K_SIZE)
+  else if (f.fileSize() != DSK_720K_SIZE && f.fileSize() != DSK_360K_SIZE)
     err = ERR_BAD_FILE_MODE;
   f.close();
   return err;
@@ -405,6 +407,10 @@ inline void processData(register uint8_t data)
             _io_status = DSKIO_ERR_NOT_READY;        //la imagen ya no esta en la SD
           else if (_sector_pos + _total > dsk.fileSize())
             _io_status = DSKIO_ERR_RECORD_NOT_FOUND; //no dejo que la imagen crezca
+          else if (_cmd == CMD_WRITE && _media == DSK_720K_MEDIA && dsk.fileSize() != DSK_720K_SIZE)
+            _io_status = DSKIO_ERR_WRITE_FAULT;      //DPB de 720 KB sobre una imagen de 360:
+                                                     //con una ROM que no elige el DPB por la
+                                                     //FAT, escribir corromperia la imagen
           else
           {
             _io_status = 0;

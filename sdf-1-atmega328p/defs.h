@@ -65,7 +65,8 @@
 // cuando un cambio obliga a grabar ROM y firmware juntos; tiene que coincidir
 // con PROTOCOL en DSKDRV.MAC.
 //   1 = byte de estado en READ/WRITE, SDFFILES/SDFMOUNT/SDFUMOUNT, SDFTEST
-#define PROTOCOL_VERSION  1
+//   2 = imagenes de 360 KB: GETDPB elige el DPB por el primer byte de la FAT
+#define PROTOCOL_VERSION  2
 
 // 0xDx: diagnostico
 #define CMD_DEBUG     0xD0
@@ -114,17 +115,21 @@
 // que muestra el MSX. Asi la ROM no necesita una tabla de mensajes.
 #define ERR_FILE_NOT_FOUND        53
 #define ERR_BAD_FILE_NAME         56
-#define ERR_BAD_FILE_MODE         61  //la imagen no es de 720 KB
+#define ERR_BAD_FILE_MODE         61  //la imagen no es de 360 ni de 720 KB
 #define ERR_BAD_DRIVE_NAME        62
 
-// Unico formato que conoce GETDPB en la ROM: 3,5" doble faz, 80 pistas.
-#define DSK_720K_SIZE             737280UL
+// Formatos que conoce GETDPB en la ROM, los dos de 3,5" y 80 pistas. La ROM
+// elige el DPB por el primer byte de la FAT; el firmware solo mira el largo.
+#define DSK_720K_SIZE             737280UL  //doble faz, media F9
+#define DSK_360K_SIZE             368640UL  //una cara, media F8
+#define DSK_720K_MEDIA            0xF9
 #define DSK_NAME_LEN              13  //nombre 8.3 mas el 0 final
 
 // Byte de estado de CMD_READ y CMD_WRITE, antes de los sectores: 0 si se
 // puede, si no el codigo de error que DSKIO le devuelve al DOS.
 #define DSKIO_ERR_NOT_READY         2 //drive sin imagen, o la imagen ya no esta
 #define DSKIO_ERR_RECORD_NOT_FOUND  8 //sector fuera de la imagen
+#define DSKIO_ERR_WRITE_FAULT      10 //escritura con DPB de 720 KB en una imagen de 360
 
 // EEPROM: las imagenes montadas en A y B, para que sobrevivan al apagado.
 #define EEPROM_MAGIC_ADDR         0

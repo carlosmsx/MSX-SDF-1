@@ -103,7 +103,7 @@ SECLEN		equ	512		; Size of biggest sector
 
 ;Version del protocolo con el firmware: tiene que coincidir con
 ;PROTOCOL_VERSION en defs.h. La compara CALL SDFTEST.
-PROTOCOL	EQU		1
+PROTOCOL	EQU		2
 
 ;0DxH: diagnostico
 CMD_DEBUG	EQU		0D0H
@@ -389,36 +389,71 @@ DSKCHG:
 ; Changed:	AF,BC,DE,HL,IX,IY may be affected
 
 	PUBLIC	GETDPB
+;
+; El kernel de DOS1 lee la FAT despues de un DSKCHG con cambio y llama aca con
+; su primer byte en B: F8 es un 360 KB, cualquier otra cosa se toma como
+; 720 KB. Desde nuestro DSKCHG llega B=FF, antes de que el kernel lea la FAT:
+; ese DPB de 720 KB dura hasta que el kernel vuelve a llamar con el byte real.
+
 GETDPB:
 	PUSH	AF
 	LD		A,CMD_GETDPB
 	CALL	WriteCommand
 	POP		AF
-	OR		A			;???
 	EX		DE,HL		;porque no existe LD DE,HL
 	INC		DE
-	LD		HL,DpbTable
+	LD		HL,DpbTable		;720 KB
+	LD		A,B				;primer byte de la FAT
+	CP		0F8H
+	JR		NZ,.COPY
+	LD		HL,Dpb360
+.COPY:
 	LD		BC,18
 	LDIR
+	OR		A				;carry limpio
 	RET
 
+; Un DPB por formato, desde el media: son los 18 bytes de [HL+1..HL+18]. Los
+; dos son de 3,5" y 80 pistas. El firmware lee por sector logico, asi que la
+; geometria fisica (caras, sectores por pista) no aparece.
+
 DpbTable:
-	db		0F9h	; Media F9
-	dw		512		; 80 Tracks
-	db		0Fh		; 9 sectors
-	db		04h		; 2 sides
-	db		01h		; 3.5" 720 Kb
+	db		0F9h	; media: 720 KB, doble faz
+	dw		512		; bytes por sector
+	db		0Fh		; mascara de directorio (16 entradas por sector)
+	db		04h		; shift de directorio
+	db		01h		; mascara de cluster (2 sectores por cluster)
+	db		02h		; shift de cluster
+	dw		1		; primer sector de la FAT
+	db		2		; cantidad de FATs
+	db		112		; entradas de directorio
+	dw		14		; primer sector de datos
+	dw		714		; clusters + 1
+	db		3		; sectores por FAT
+	dw		7		; primer sector del directorio
+
+Dpb360:
+	db		0F8h	; media: 360 KB, una cara
+	dw		512
+	db		0Fh
+	db		04h
+	db		01h
 	db		02h
 	dw		1
 	db		2
 	db		112
-	dw		14
-	dw		714
-	db		3
-	dw		7
+	dw		12
+	dw		355
+	db		2
+	dw		5
 
+;DEFDPB es el de 720 KB: el kernel lo copia en el DPB de cada drive al arrancar,
+;antes del primer GETDPB, y con ese DPB lee la FAT.
+;Apunta al media y no a DpbTable-1 como la plantilla de msxsyssrc: el INIT del
+;kit ya resta 1 (LD HL,DEFDPB-1 para copiar los 21 bytes, LD A,(DEFDPB) para el
+;media), asi que con DpbTable-1 la copia quedaba corrida un byte.
 	PUBLIC	DEFDPB
-DEFDPB		equ	DpbTable	;NO DpbTable-1 because it make it fail
+DEFDPB		equ	DpbTable
 
 
 ; CHOICE

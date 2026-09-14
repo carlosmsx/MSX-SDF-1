@@ -129,7 +129,8 @@ los dos lados.
 
 Nada de ese hardware es específico de leer disquetes. Lo que hay en el cartucho
 es un ATmega328P asomado al bus del MSX por dos puertos de I/O decodificados, una
-ROM de 16 K para poner rutinas del lado del Z80, y un handshake byte a byte con
+EEPROM de 64 K regrabable con un adaptador, para poner rutinas del lado del Z80
+(la DiskROM del lector de SD ocupa sólo 16 K de esos 64), y un handshake byte a byte con
 `/WAIT`. El DSK es sólo *un* juego de comandos sobre eso: cambiando ROM +
 firmware, y manteniendo la misma arquitectura, la misma placa puede ser otra
 cosa.

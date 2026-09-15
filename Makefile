@@ -79,6 +79,10 @@ MODULES2 := BASDATA
 CODE_ORG := 4000h
 DATA_ORG := F237h
 
+# 0xF327 = donde empiezan los datos de BASDATA (AUXBOD). Son los 240 bytes de
+# MSXDATA a partir de F237, y nada mas: ver el comentario de LK80_ARGS.
+DATA_ORG2 := F327h
+
 REL_KIT  := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES)))
 REL_KIT2 := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES2)))
 
@@ -100,7 +104,7 @@ check-rom:
 
 # python y no mkdir -p: desde cmd, "mkdir -p out" crea tambien una carpeta "-p".
 $(OUT):
-	@$(PYTHON) -c "import os; os.makedirs('$(OUT)', exist_ok=True)"
+	@$(PYTHON) -c "import os; os.makedirs(r'$(OUT)', exist_ok=True)"
 
 # --- 1. Ensamblar el driver ---------------------------------------------
 # -bt rel: relocalizable formato M80, que es lo que espera LK80.
@@ -120,8 +124,16 @@ $(OUT)/DSKDRV.REL: $(DRIVER) | $(OUT)
 #
 # Los argumentos van en una variable para que la receta sea una sola linea:
 # cmd no entiende las lineas de receta partidas con \.
+#
+# --data $(DATA_ORG2) antes de BASDATA: OBLIGATORIO. El .REL que arma N80 para
+# el driver le hace reservar a LK80 un byte de datos aunque no tenga ninguno,
+# y sin esto todo el segmento de datos de BASDATA queda un byte corrido:
+# AUXBOD en F328 en vez de F327, y detras RAMAD0, $SECBUF, $DPBLIST, XFER...
+# Son variables de sistema de MSX-DOS con direccion fija; corridas, la maquina
+# muestra el logo, hace un beep y se reinicia. Con esto el link reproduce byte
+# a byte, en todo el codigo, la ROM de ZiggyBox armada con M80/L80.
 LK80_ARGS = --code $(CODE_ORG) --data $(DATA_ORG) \
-            $(REL_KIT) $(OUT)/DSKDRV.REL $(REL_KIT2) \
+            $(REL_KIT) $(OUT)/DSKDRV.REL --data $(DATA_ORG2) $(REL_KIT2) \
             --output-format hex --output-file
 $(OUT)/msxdos.hex: $(OUT)/DSKDRV.REL
 	$(LK80) $(LK80_ARGS) $@
@@ -132,7 +144,7 @@ $(OUT)/sdf1.rom: $(OUT)/msxdos.hex tools/mkrom.py
 	$(PYTHON) tools/mkrom.py $< $@
 
 clean:
-	@$(PYTHON) -c "import shutil; shutil.rmtree('$(OUT)', ignore_errors=True)"
+	@$(PYTHON) -c "import shutil; shutil.rmtree(r'$(OUT)', ignore_errors=True)"
 
 # ======================= Firmware (ATmega328P) =========================
 #

@@ -67,6 +67,15 @@ volatile uint8_t _io_status;
 char _list_name[DSK_NAME_LEN];
 volatile uint8_t _list_idx;
 volatile uint8_t _test_idx;
+char _test_msg[TEST_MSG_MAX + 1]; //lo arma buildTestMsg, lo manda CMD_SDFTEST
+
+// La SD la inicializa loop(), reintentando hasta que ande, y no setup(): asi
+// el MSX tiene quien le conteste aunque no haya tarjeta. Mientras _sd_ok sea
+// false la ISR no toca la SD, porque loop() puede estar en medio de un
+// SD.begin() usando el SPI. Pasa a true con la raiz abierta y las imagenes
+// montadas ya recuperadas de la EEPROM.
+volatile bool _sd_ok = false;
+volatile uint8_t _sd_error = SD_NOT_TRIED; //sdErrorCode() del ultimo intento fallido
 
 const char* diskFile(uint8_t drive)
 {
@@ -147,6 +156,11 @@ void mountDisk()
     _mount_result = ERR_BAD_DRIVE_NAME;
     return;
   }
+  if (!_sd_ok)
+  {
+    _mount_result = ERR_DISK_OFFLINE;
+    return;
+  }
   if (_mount_len >= sizeof(_mount_name))
   {
     _mount_result = ERR_BAD_FILE_NAME;
@@ -164,7 +178,8 @@ void mountDisk()
 }
 
 // Cierra CMD_SDFUMOUNT: deja el drive sin imagen, tambien en la EEPROM.
-// Desmontar un drive que ya estaba vacio no es error.
+// Desmontar un drive que ya estaba vacio no es error. Sin SD no se puede:
+// _mounted todavia no tiene lo de la EEPROM, y grabarlo pisaria el otro drive.
 void umountDisk(uint8_t drive)
 {
   _cmd_st = CMD_SDFUMOUNT__RESULT;
@@ -174,10 +189,56 @@ void umountDisk(uint8_t drive)
     _mount_result = ERR_BAD_DRIVE_NAME;
     return;
   }
+  if (!_sd_ok)
+  {
+    _mount_result = ERR_DISK_OFFLINE;
+    return;
+  }
   _mounted[drive][0] = 0;
   _dsk_changed[drive] = 1; //el DOS descarta lo que tenga en buffers de ese drive
   _save_mounted = true;
   _mount_result = 0;
+}
+
+// Arma el texto de CALL SDFTEST: la version y, en otra linea, el estado de la
+// SD. La ROM lo imprime tal cual despues de "Firmware ".
+void buildTestMsg()
+{
+  strcpy(_test_msg, FW_VERSION "\r\nSD ");
+  if (_sd_ok)
+    strcat(_test_msg, "ok");
+  else if (_sd_error == SD_NOT_TRIED)
+    strcat(_test_msg, "iniciando");
+  else if (_sd_error == SD_CARD_ERROR_CMD0)
+    strcat(_test_msg, "no contesta"); //sin tarjeta, modulo desenchufado o cableado
+  else if (_sd_error == 0)
+    strcat(_test_msg, "no es FAT");   //la tarjeta anda: exFAT o sin formatear
+  else
+  {
+    static const char hex[] = "0123456789ABCDEF";
+    char code[] = "error 0x00";       //el numero es el enum SD_CARD_ERROR de SdFat
+    code[8] = hex[_sd_error >> 4];
+    code[9] = hex[_sd_error & 0x0f];
+    strcat(_test_msg, code);
+  }
+}
+static_assert(sizeof(FW_VERSION "\r\nSD no contesta") - 1 <= TEST_MSG_MAX,
+              "el texto de CALL SDFTEST no entra en lo que lee la ROM");
+
+// Un intento de inicializar la SD, desde loop(). Si anda, abre la raiz,
+// recupera las imagenes montadas y recien ahi le habilita la SD a la ISR.
+void initSD()
+{
+  if (!SD.begin(CS, SPI_FULL_SPEED))
+  {
+    _sd_error = SD.sdErrorCode(); //0 si la tarjeta contesta pero no hay FAT16/FAT32
+    return;
+  }
+  dir = SD.open("/");
+  loadMounted();
+  _dsk_changed[0] = 1; //si el DOS arranco antes que la SD, que descarte lo que
+  _dsk_changed[1] = 1; //tenga en buffers de los dos drives
+  _sd_ok = true;
 }
 
 // Inicialmente se usaron los pines 0-1 del puerto B para los bits 0-1 del bus de datos
@@ -232,6 +293,7 @@ inline void processCommand(register uint8_t command)
   {
     case CMD_SDFTEST:
       //Serial.println("CMD_SDFTEST");
+      buildTestMsg();
       _test_idx = 0xff; //la primera lectura manda la version del protocolo
       break;
     case CMD_SENDSTR:
@@ -242,7 +304,8 @@ inline void processCommand(register uint8_t command)
       break;
     case CMD_SDFFILES:
       //Serial.println("CMD_SDFFILES");
-      dir.rewindDirectory();
+      if (_sd_ok)
+        dir.rewindDirectory();
       _list_idx = 0xff; //la primera lectura busca el primer nombre
       break;
     case CMD_SDFUMOUNT:
@@ -392,9 +455,9 @@ inline void processData(register uint8_t data)
 
           //antes de los sectores el MSX lee un byte de estado, ver dataToSend
           _cmd_st = CMD_ST__IO_STATUS;
-          if (diskFile(_drive_number)[0] == 0)
+          if (!_sd_ok || diskFile(_drive_number)[0] == 0)
           {
-            _io_status = DSKIO_ERR_NOT_READY; //drive sin imagen montada
+            _io_status = DSKIO_ERR_NOT_READY; //sin SD, o drive sin imagen montada
             break;
           }
 
@@ -455,23 +518,23 @@ inline uint8_t dataToSend()
   switch(_cmd)
   {
     case CMD_SDFTEST:
-      //primero la version del protocolo, despues FW_VERSION como ASCIIZ
+      //primero la version del protocolo, despues _test_msg como ASCIIZ
       if ( _test_idx == 0xff )
       {
         _test_idx = 0;
         return PROTOCOL_VERSION;
       }
-      if ( FW_VERSION[_test_idx] == 0 )
+      if ( _test_msg[_test_idx] == 0 )
       {
         _cmd = 0;
         return 0;
       }
-      return FW_VERSION[_test_idx++];
+      return _test_msg[_test_idx++];
     case CMD_SDFFILES:
       //un byte por lectura: los nombres como ASCIIZ y un nombre vacio al final
       if ( _list_idx == 0xff )
       {
-        if (!nextDskName())
+        if (!_sd_ok || !nextDskName()) //sin SD, la lista vacia
         {
           _cmd = 0;
           return 0;
@@ -669,16 +732,10 @@ void setup() {
 
   configDataBusAsInput();
 
-  while (!SD.begin(CS, SPI_FULL_SPEED))
-  {
-    //u8x8.drawString(0,0,"Inserte SD");
-  }
-  //u8x8.drawString(0,0,"SD OK");
-  
-  dir = SD.open("/");
-  loadMounted();
-  //findDsk();
-  
+  // La SD no se espera aca: la inicializa loop(). Antes setup() giraba hasta
+  // que la SD anduviera y mientras tanto nadie atendia al MSX: CALL SDFTEST
+  // leia el bus flotando y no habia forma de saber por que.
+
   digitalWrite(MSX_EN_PIN, LOW); //deshabilito el decoder
 
   // Armo el pin-change de PC0 (PCINT8) a mano. El orden importa: primero
@@ -694,6 +751,15 @@ void setup() {
   
 void loop()
 {
+  // Mientras no haya SD, reintento. La ISR ya atiende al MSX: a los comandos
+  // que necesitan la SD les contesta que no esta, y SDFTEST muestra por que.
+  if (!_sd_ok)
+  {
+    initSD();
+    if (!_sd_ok)
+      delay(SD_RETRY_MS);
+  }
+
   // Grabo en la EEPROM lo que monto CALL SDFMOUNT. Va aca y no en la ISR:
   // cada byte tarda ~3,4 ms y durante la ISR el MSX esta en /WAIT, sin
   // refresco de la DRAM. update() solo escribe los bytes que cambiaron.

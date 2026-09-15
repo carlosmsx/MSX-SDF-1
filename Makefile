@@ -6,6 +6,7 @@
 #
 # Salidas, todas en out/ (que esta en .gitignore):
 #   out/sdf1.rom                        imagen de 64 KB para la W27C512
+#   out/page2.bin                       rutinas de manejo, pagina 2 de la ROM
 #   out/firmware/*.hex                  firmware del ATmega328P
 #
 # OJO: build/ NO es una carpeta de salida, es el MSX-DOS kit de ASCII. No
@@ -13,11 +14,13 @@
 #
 # Y OJO DE NUEVO: build/ NO VIENE EN ESTE REPO. Es codigo de terceros y no
 # esta redistribuido aca. Tenes que poner tu propia copia del MSX-DOS kit en
-# build/ antes de "make rom" — los ocho .REL que lista MODULES/MODULES2, mas
-# el README del kit. "make check" te avisa si falta.
+# build/ antes de "make rom" — los ocho .REL que lista MODULES/MODULES2, el
+# BOOT.Z80 (el sector de arranque que escriben DSKFMT y CALL SDFNEW) y el
+# README del kit. "make check" te avisa si falta.
 #
 # Por lo mismo out/sdf1.rom NO se publica: contiene el kernel de ASCII
 # linkeado con nuestro driver. Se compila localmente, no se distribuye.
+# out/page2.bin, en cambio, es solo codigo propio (diskrom/PAGE2.MAC).
 #
 #
 # ============================ DiskROM (Z80) ============================
@@ -53,6 +56,8 @@
 # carpetas va con python, que ya es dependencia por mkrom.py.
 
 DRIVER   := diskrom/DSKDRV.MAC
+PAGE2    := diskrom/PAGE2.MAC
+PROTO    := diskrom/PROTOCOL.INC
 KIT      := build
 OUT      := out
 
@@ -98,6 +103,7 @@ check-rom:
 	$(if $(wildcard $(N80)),,$(error falta $(N80) — ver el encabezado de este Makefile))
 	$(if $(wildcard $(LK80)),,$(error falta $(LK80) — ver el encabezado de este Makefile))
 	$(if $(wildcard $(KIT)/DOSHEAD.REL),,$(error falta el MSX-DOS kit en $(KIT)/))
+	$(if $(wildcard $(KIT)/BOOT.Z80),,$(error falta $(KIT)/BOOT.Z80 del MSX-DOS kit: es el sector de arranque))
 	$(info N80  $(shell $(N80) --version))
 	$(info LK80 $(shell $(LK80) --version))
 	$(info kit  $(words $(MODULES) $(MODULES2)) modulos en $(KIT)/)
@@ -114,8 +120,11 @@ $(OUT):
 # "can't resolve external symbol reference" en OEMSTA (el kit espera 6
 # caracteres, el driver exporta OEMSTATEMENT) y en $SECBU (el driver pide
 # $SECBUF, 7 caracteres).
-$(OUT)/DSKDRV.REL: $(DRIVER) | $(OUT)
-	$(N80) $(DRIVER) $@ -bt rel -l8c
+#
+# -id $(KIT): DSKDRV.MAC incluye el BOOT.Z80 del kit como plantilla del sector
+# de arranque (ver el final de DSKDRV.MAC).
+$(OUT)/DSKDRV.REL: $(DRIVER) $(PROTO) $(KIT)/BOOT.Z80 | $(OUT)
+	$(N80) $(DRIVER) $@ -bt rel -l8c -id $(KIT)
 
 # --- 2. Linkear contra el kit -------------------------------------------
 # --code y --data son "link sequence items": aplican al archivo siguiente,
@@ -138,10 +147,18 @@ LK80_ARGS = --code $(CODE_ORG) --data $(DATA_ORG) \
 $(OUT)/msxdos.hex: $(OUT)/DSKDRV.REL
 	$(LK80) $(LK80_ARGS) $@
 
-# --- 3. Armar la imagen de EEPROM ---------------------------------------
-# Ubica el codigo, rellena los 64 KB con FF y verifica la firma "AB".
-$(OUT)/sdf1.rom: $(OUT)/msxdos.hex tools/mkrom.py
-	$(PYTHON) tools/mkrom.py $< $@
+# --- 3. Ensamblar la pagina 2 -------------------------------------------
+# Las rutinas de manejo (diskrom/PAGE2.MAC), en 8000h. Binario absoluto y
+# aparte: no se linkea con el kit. La tabla de saltos del principio es el
+# contrato con los P2_... de DSKDRV.MAC.
+$(OUT)/page2.bin: $(PAGE2) $(PROTO) | $(OUT)
+	$(N80) $(PAGE2) $@ -bt abs
+
+# --- 4. Armar la imagen de EEPROM ---------------------------------------
+# Ubica el codigo de las dos paginas, rellena los 64 KB con FF y verifica la
+# firma "AB".
+$(OUT)/sdf1.rom: $(OUT)/msxdos.hex $(OUT)/page2.bin tools/mkrom.py
+	$(PYTHON) tools/mkrom.py $< $@ $(OUT)/page2.bin
 
 clean:
 	@$(PYTHON) -c "import shutil; shutil.rmtree(r'$(OUT)', ignore_errors=True)"

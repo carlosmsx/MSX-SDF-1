@@ -55,7 +55,8 @@
 //   0xDx  diagnostico
 //   0xEx  manejo de la SD y de las imagenes DSK (CALL SDF...)
 //   0xFx  driver de disco de MSX-DOS (las rutinas de DSKDRV.MAC)
-// Tienen que coincidir con los EQU de DSKDRV.MAC.
+// Tienen que coincidir con los EQU de diskrom/PROTOCOL.INC, que incluyen las
+// dos paginas de la ROM.
 
 // Version del firmware, la muestra CALL SDFTEST. La fecha de compilacion
 // distingue dos grabaciones de la misma version.
@@ -67,10 +68,11 @@
 
 // Version del protocolo con la ROM, tambien la compara CALL SDFTEST. Sube
 // cuando un cambio obliga a grabar ROM y firmware juntos; tiene que coincidir
-// con PROTOCOL en DSKDRV.MAC.
+// con PROTOCOL en diskrom/PROTOCOL.INC.
 //   1 = byte de estado en READ/WRITE, SDFFILES/SDFMOUNT/SDFUMOUNT, SDFTEST
 //   2 = imagenes de 360 KB: GETDPB elige el DPB por el primer byte de la FAT
-#define PROTOCOL_VERSION  2
+//   3 = CALL SDFNEW, y DSKFMT formatea segun el largo de la imagen
+#define PROTOCOL_VERSION  3
 
 // 0xDx: diagnostico
 #define CMD_DEBUG     0xD0
@@ -81,6 +83,7 @@
 #define CMD_SDFMOUNT  0xE1
 #define CMD_SDFFILES  0xE2
 #define CMD_SDFUMOUNT 0xE3
+#define CMD_SDFNEW    0xE4
 
 // 0xFx: driver de disco de MSX-DOS
 #define CMD_WRITE     0xF0
@@ -112,23 +115,42 @@
 #define CMD_SDFMOUNT__RESULT      33
 #define CMD_SDFUMOUNT__DRIVE      34
 #define CMD_SDFUMOUNT__RESULT     35
+#define CMD_SDFNEW__MEDIA         36
+#define CMD_SDFNEW__LENGTH        37
+#define CMD_SDFNEW__NAME          38
+#define CMD_SDFNEW__RESULT        39
 #define CMD_DSKCHG__DRIVE_NUMBER  40
 #define CMD_DSKCHG__STATUS        41
+#define CMD_DSKFMT__DRIVE         42
+#define CMD_DSKFMT__MEDIA         43
 
-// Respuesta de CMD_SDFMOUNT: 0 si monto, si no el numero de error de BASIC
-// que muestra el MSX. Asi la ROM no necesita una tabla de mensajes.
+// Respuesta de CMD_SDFMOUNT, CMD_SDFUMOUNT y CMD_SDFNEW: 0 si anduvo, si no el
+// numero de error de BASIC que muestra el MSX. Asi la ROM no necesita una tabla
+// de mensajes.
 #define ERR_FILE_NOT_FOUND        53
 #define ERR_BAD_FILE_NAME         56
 #define ERR_BAD_FILE_MODE         61  //la imagen no es de 360 ni de 720 KB
 #define ERR_BAD_DRIVE_NAME        62
-#define ERR_DISK_OFFLINE          70  //no hay SD, o todavia no inicializo
+#define ERR_FILE_ALREADY_EXISTS   65
+#define ERR_DISK_FULL             66
+#define ERR_DISK_IO               69
+#define ERR_DISK_OFFLINE          70  //no hay SD, todavia no inicializo, o esta ocupada
 
 // Formatos que conoce GETDPB en la ROM, los dos de 3,5" y 80 pistas. La ROM
 // elige el DPB por el primer byte de la FAT; el firmware solo mira el largo.
 #define DSK_720K_SIZE             737280UL  //doble faz, media F9
 #define DSK_360K_SIZE             368640UL  //una cara, media F8
 #define DSK_720K_MEDIA            0xF9
+#define DSK_360K_MEDIA            0xF8
 #define DSK_NAME_LEN              13  //nombre 8.3 mas el 0 final
+
+// CALL SDFNEW. Mientras loop() crea la imagen, el MSX lee SDFNEW_BUSY en vez
+// del resultado: no choca con los errores de BASIC ni con el bus flotando (FF).
+// La imagen recien creada se escribe como un tercer drive, NEW_DRIVE, que el
+// DOS no conoce. Los ceros se escriben de a NEW_ZERO_CHUNK bytes.
+#define SDFNEW_BUSY               0xFE
+#define NEW_DRIVE                 2
+#define NEW_ZERO_CHUNK            64
 
 // SD: pausa entre intentos de inicializarla, y valor de _sd_error antes del
 // primer intento. Los codigos de error de SdFat son chicos: 0xFF no choca.

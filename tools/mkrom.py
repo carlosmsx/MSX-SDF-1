@@ -1,26 +1,31 @@
 #!/usr/bin/env python3
 """
-Arma la imagen final de EEPROM del cartucho SDF-1 a partir del Intel HEX
-que produce L80.
+Arma la imagen final de EEPROM del cartucho SDF-1: la DiskROM, que produce
+L80 como Intel HEX, y las rutinas de manejo de la pagina 2.
 
 La DiskROM vive en la pagina 1 del slot (0x4000-0x7FFF). El chip es una
 W27C512 de 64 KB con A0-A15 completos y CE=/SLTSL, asi que responde en
 todo el espacio de direcciones del slot: lo que aparece en cada pagina lo
 decide unicamente como se grabe el binario.
 
+La pagina 2 (0x8000-0xBFFF) es un binario absoluto aparte, ensamblado desde
+diskrom/PAGE2.MAC. No lleva nada del kit de ASCII.
+
 Este script:
   - vuelca el HEX en una imagen de 64 KB rellena con 0xFF
+  - si se le pasa, pone el binario de la pagina 2 en 0x8000
   - verifica que la firma "AB" quede en 0x4000 y en ningun otro lado
-  - avisa cuanto espacio libre queda en la pagina 1
+  - avisa cuanto espacio libre queda en las paginas 1 y 2
 
 Uso:
-    python tools/mkrom.py out/msxdos.hex out/sdf1.rom
+    python tools/mkrom.py out/msxdos.hex out/sdf1.rom [out/page2.bin]
 """
 
 import sys
 
 ROM_SIZE = 0x10000        # W27C512: 64 KB
 PAGE1 = 0x4000            # donde el BIOS busca una DiskROM
+PAGE2 = 0x8000            # rutinas de manejo, fuera del kit
 PAGE_SIZE = 0x4000
 SIGNATURE = b"AB"         # el BIOS busca 41h 42h exactos
 
@@ -56,10 +61,11 @@ def read_ihex(path):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         sys.exit(__doc__.strip())
 
     hex_path, out_path = sys.argv[1], sys.argv[2]
+    page2_path = sys.argv[3] if len(sys.argv) == 4 else None
     mem = read_ihex(hex_path)
     if not mem:
         sys.exit("mkrom: %s no contiene datos" % hex_path)
@@ -83,6 +89,31 @@ def main():
     # Fin del codigo: ultimo byte con contenido. El relleno de LK80 es 0x00.
     hi = max(a for a, b in page1.items() if b != 0)
     lo = PAGE1
+
+    page2 = None
+    if page2_path:
+        with open(page2_path, "rb") as f:
+            page2 = f.read()
+        if not page2:
+            sys.exit("mkrom: %s esta vacio" % page2_path)
+        if len(page2) > PAGE_SIZE:
+            sys.exit("mkrom: %s tiene %d bytes y en la pagina 2 entran %d"
+                     % (page2_path, len(page2), PAGE_SIZE))
+        # Con "AB" al principio el BIOS la tomaria por la cabecera de otro
+        # cartucho y llamaria a un INIT que no existe.
+        if page2[:2] == SIGNATURE:
+            sys.exit(
+                "mkrom: %s empieza con la firma AB.\n"
+                "        El BIOS la tomaria por la cabecera de un cartucho.\n"
+                "        La pagina 2 empieza por su tabla de saltos." % page2_path)
+        # El link no deberia poner nada en la pagina 2: si lo hiciera, el
+        # binario lo pisaria sin que nadie se entere.
+        clash = [a for a in outside if PAGE2 <= a < PAGE2 + PAGE_SIZE]
+        if clash:
+            sys.exit("mkrom: el HEX tiene datos en 0x%04X-0x%04X, donde va %s"
+                     % (clash[0], clash[-1], page2_path))
+        rom[PAGE2:PAGE2 + len(page2)] = page2
+        outside = [a for a in outside if not (PAGE2 <= a < PAGE2 + PAGE_SIZE)]
 
     # --- Verificaciones que atrapan el error mas caro ------------------
     # Sin la firma correcta el BIOS saltea el slot entero: la placa puede
@@ -110,6 +141,10 @@ def main():
     print("mkrom: %s" % out_path)
     print("       codigo   0x%04X - 0x%04X  (%d bytes)" % (lo, hi, hi - lo + 1))
     print("       libre    %d bytes en la pagina 1" % (PAGE1 + PAGE_SIZE - hi - 1))
+    if page2 is not None:
+        print("       pagina 2 0x%04X - 0x%04X  (%d bytes, %d libres)"
+              % (PAGE2, PAGE2 + len(page2) - 1, len(page2),
+                 PAGE_SIZE - len(page2)))
     print("       firma    AB en 0x4000, unica")
     if outside:
         print("       datos    %d bytes en 0x%04X-0x%04X, fuera de la ROM "

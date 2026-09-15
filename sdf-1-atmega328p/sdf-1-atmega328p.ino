@@ -77,8 +77,27 @@ char _test_msg[TEST_MSG_MAX + 1]; //lo arma buildTestMsg, lo manda CMD_SDFTEST
 volatile bool _sd_ok = false;
 volatile uint8_t _sd_error = SD_NOT_TRIED; //sdErrorCode() del ultimo intento fallido
 
+// CALL SDFNEW: la ISR recibe el pedido y loop() crea la imagen, porque llenarla
+// de ceros tarda segundos. Mientras _sd_busy este en true el SPI es de loop() y
+// la ISR no toca la SD. La imagen creada queda en _new_name, que es el drive
+// NEW_DRIVE: por ahi la ROM le escribe los sectores de sistema.
+char _new_name[DSK_NAME_LEN];
+volatile uint8_t _new_media;
+volatile uint8_t _new_result;
+volatile bool _new_request = false;
+volatile bool _sd_busy = false;
+volatile uint8_t _fmt_media; //respuesta de CMD_DSKFMT
+
+// La ISR puede usar la SD: ya esta inicializada y loop() no la esta usando.
+inline bool sdReady()
+{
+  return _sd_ok && !_sd_busy;
+}
+
 const char* diskFile(uint8_t drive)
 {
+  if (drive == NEW_DRIVE)
+    return _new_name; //la imagen que acaba de crear CALL SDFNEW
   return _mounted[drive ? 1 : 0];
 }
 
@@ -156,7 +175,7 @@ void mountDisk()
     _mount_result = ERR_BAD_DRIVE_NAME;
     return;
   }
-  if (!_sd_ok)
+  if (!sdReady())
   {
     _mount_result = ERR_DISK_OFFLINE;
     return;
@@ -224,6 +243,120 @@ void buildTestMsg()
 }
 static_assert(sizeof(FW_VERSION "\r\nSD no contesta") - 1 <= TEST_MSG_MAX,
               "el texto de CALL SDFTEST no entra en lo que lee la ROM");
+
+// Pasa el nombre de CALL SDFNEW a 8.3 en mayusculas, con .DSK si no trae
+// extension. Devuelve false si no es un nombre corto valido: SdFat crearia un
+// nombre largo, y MSX-DOS 1 y SDFMOUNT solo ven el corto. dst tiene lugar
+// para DSK_NAME_LEN bytes, y len tiene que ser menor que eso.
+bool makeNewName(const char *src, uint8_t len, char *dst)
+{
+  uint8_t base = 0, ext = 0;
+  bool dot = false;
+  for (uint8_t i = 0; i < len; i++)
+  {
+    char c = toupper(src[i]);
+    if (c == '.')
+    {
+      if (dot || base == 0)
+        return false;
+      dot = true;
+    }
+    else if (c <= ' ' || c > '~' || strchr("\"*+,/:;<=>?[\\]|", c))
+      return false;
+    else if (dot ? ++ext > 3 : ++base > 8)
+      return false;
+    *dst++ = c;
+  }
+  if (base == 0 || (dot && ext == 0))
+    return false;
+  strcpy(dst, dot ? "" : ".DSK");
+  return true;
+}
+
+// Cierra la recepcion de CMD_SDFNEW: valida el pedido y se lo pasa a loop().
+// Hasta que loop() termine, la ROM lee SDFNEW_BUSY.
+void requestNewDisk()
+{
+  _cmd_st = CMD_SDFNEW__RESULT;
+
+  if (!sdReady())
+    _new_result = ERR_DISK_OFFLINE;
+  else if (_new_media != DSK_720K_MEDIA && _new_media != DSK_360K_MEDIA)
+    _new_result = ERR_BAD_FILE_MODE;
+  else if (_mount_len >= sizeof(_mount_name) || !makeNewName(_mount_name, _mount_len, _new_name))
+  {
+    _new_name[0] = 0; //lo que haya dejado makeNewName no es una imagen
+    _new_result = ERR_BAD_FILE_NAME;
+  }
+  else
+  {
+    _sd_busy = true;  //desde ya, la ISR no toca la SD
+    _new_result = SDFNEW_BUSY;
+    _new_request = true;
+  }
+}
+
+// Crea la imagen de CALL SDFNEW, desde loop(): la reserva contigua si se puede y
+// la llena de ceros, para que no arrastre restos de archivos borrados de la SD.
+// Si algo falla la borra, para no dejar una imagen a medias.
+void createNewDisk()
+{
+  static const uint8_t zeros[NEW_ZERO_CHUNK] = { 0 };
+  uint32_t left = _new_media == DSK_360K_MEDIA ? DSK_360K_SIZE : DSK_720K_SIZE;
+  uint8_t err = 0;
+
+  if (SD.exists(_new_name))
+    err = ERR_FILE_ALREADY_EXISTS;
+  else
+  {
+    File f = SD.open(_new_name, O_RDWR | O_CREAT | O_EXCL);
+    if (!f)
+      err = ERR_DISK_IO; //raiz llena, o la SD no escribe
+    else
+    {
+      f.preAllocate(left); //si no hay lugar contiguo, write() la agranda igual
+      while (left > 0 && err == 0)
+      {
+        uint16_t n = left < sizeof(zeros) ? left : sizeof(zeros);
+        if (f.write(zeros, n) != n)
+          err = ERR_DISK_FULL;
+        left -= n;
+      }
+      f.close();
+      if (err)
+        SD.remove(_new_name);
+    }
+  }
+
+  if (err)
+    _new_name[0] = 0;
+  _sd_busy = false;  //antes que el resultado: la ROM escribe apenas lo lee
+  _new_result = err;
+}
+
+// Contesta CMD_DSKFMT: el media del formato que le corresponde a la imagen del
+// drive por su largo, o 0 si no hay imagen. La ROM formatea con eso, y el
+// proximo DSKCHG de ese drive le avisa al DOS que la relea.
+uint8_t formatMedia(uint8_t drive)
+{
+  if (drive > NEW_DRIVE || !sdReady() || diskFile(drive)[0] == 0)
+    return 0;
+
+  uint32_t size = 0;
+  File f = SD.open(diskFile(drive), O_READ);
+  if (f)
+  {
+    size = f.fileSize();
+    f.close();
+  }
+  if (drive < NEW_DRIVE)
+    _dsk_changed[drive] = 1;
+  if (size == DSK_720K_SIZE)
+    return DSK_720K_MEDIA;
+  if (size == DSK_360K_SIZE)
+    return DSK_360K_MEDIA;
+  return 0;
+}
 
 // Un intento de inicializar la SD, desde loop(). Si anda, abre la raiz,
 // recupera las imagenes montadas y recien ahi le habilita la SD a la ISR.
@@ -304,13 +437,16 @@ inline void processCommand(register uint8_t command)
       break;
     case CMD_SDFFILES:
       //Serial.println("CMD_SDFFILES");
-      if (_sd_ok)
+      if (sdReady())
         dir.rewindDirectory();
       _list_idx = 0xff; //la primera lectura busca el primer nombre
       break;
     case CMD_SDFUMOUNT:
       //Serial.println("CMD_SDFUMOUNT");
       _cmd_st = CMD_SDFUMOUNT__DRIVE;
+      break;
+    case CMD_SDFNEW:
+      _cmd_st = CMD_SDFNEW__MEDIA;
       break;
     case CMD_WRITE:
       _cmd_st = CMD_PARAM__DRIVE_NUMBER;
@@ -338,6 +474,7 @@ inline void processCommand(register uint8_t command)
       break;
     case CMD_DSKFMT:
       //Serial.println("CMD_DSKFMT");
+      _cmd_st = CMD_DSKFMT__DRIVE;
       break;
     case CMD_OEMSTAT:
       //Serial.println("CMD_OEMSTAT");
@@ -394,6 +531,37 @@ inline void processData(register uint8_t data)
     case CMD_SDFUMOUNT:
       if ( _cmd_st == CMD_SDFUMOUNT__DRIVE )
         umountDisk(data);
+      break;
+    case CMD_SDFNEW:
+      switch (_cmd_st)
+      {
+        case CMD_SDFNEW__MEDIA:
+          _new_media = data;
+          _cmd_st = CMD_SDFNEW__LENGTH;
+          break;
+        case CMD_SDFNEW__LENGTH:
+          _mount_len = data;
+          _mount_idx = 0;
+          if (_mount_len == 0)
+            requestNewDisk();
+          else
+            _cmd_st = CMD_SDFNEW__NAME;
+          break;
+        case CMD_SDFNEW__NAME:
+          if (_mount_idx < sizeof(_mount_name) - 1)
+            _mount_name[_mount_idx] = data; //si es mas largo, requestNewDisk lo rechaza
+          _mount_idx++;
+          if (_mount_idx == _mount_len)
+            requestNewDisk();
+          break;
+      }
+      break;
+    case CMD_DSKFMT:
+      if ( _cmd_st == CMD_DSKFMT__DRIVE )
+      {
+        _fmt_media = formatMedia(data);
+        _cmd_st = CMD_DSKFMT__MEDIA;
+      }
       break;
     case CMD_DSKCHG:
       if ( _cmd_st == CMD_DSKCHG__DRIVE_NUMBER )
@@ -455,9 +623,9 @@ inline void processData(register uint8_t data)
 
           //antes de los sectores el MSX lee un byte de estado, ver dataToSend
           _cmd_st = CMD_ST__IO_STATUS;
-          if (!_sd_ok || diskFile(_drive_number)[0] == 0)
+          if (!sdReady() || diskFile(_drive_number)[0] == 0)
           {
-            _io_status = DSKIO_ERR_NOT_READY; //sin SD, o drive sin imagen montada
+            _io_status = DSKIO_ERR_NOT_READY; //sin SD (o ocupada), o drive sin imagen montada
             break;
           }
 
@@ -534,7 +702,7 @@ inline uint8_t dataToSend()
       //un byte por lectura: los nombres como ASCIIZ y un nombre vacio al final
       if ( _list_idx == 0xff )
       {
-        if (!_sd_ok || !nextDskName()) //sin SD, la lista vacia
+        if (!sdReady() || !nextDskName()) //sin SD (o ocupada), la lista vacia
         {
           _cmd = 0;
           return 0;
@@ -558,6 +726,22 @@ inline uint8_t dataToSend()
       {
         _cmd = 0;
         return _mount_result;
+      }
+      break;
+    case CMD_SDFNEW:
+      if ( _cmd_st == CMD_SDFNEW__RESULT )
+      {
+        if (_new_result == SDFNEW_BUSY)
+          return SDFNEW_BUSY; //loop() todavia esta creando la imagen
+        _cmd = 0;
+        return _new_result;
+      }
+      break;
+    case CMD_DSKFMT:
+      if ( _cmd_st == CMD_DSKFMT__MEDIA )
+      {
+        _cmd = 0;
+        return _fmt_media;
       }
       break;
     case CMD_DSKCHG:
@@ -758,6 +942,14 @@ void loop()
     initSD();
     if (!_sd_ok)
       delay(SD_RETRY_MS);
+  }
+
+  // CALL SDFNEW: crear y llenar la imagen tarda segundos, asi que no puede ir
+  // en la ISR, que tiene al MSX en /WAIT. Mientras tanto la ROM lee SDFNEW_BUSY.
+  if (_new_request)
+  {
+    _new_request = false;
+    createNewDisk();
   }
 
   // Grabo en la EEPROM lo que monto CALL SDFMOUNT. Va aca y no en la ISR:

@@ -1,0 +1,418 @@
+	TITLE	PAGE2 - rutinas de manejo del SDF-1, en la pagina 2
+	.Z80
+
+; Pagina 2 de la EEPROM, 8000h-BFFFh. Aca va todo lo que no necesita estar en
+; la pagina 1, que es la DiskROM y tiene poco lugar. Es codigo propio, sin nada
+; del kit de ASCII: se ensambla aparte, como binario absoluto, y
+; tools/mkrom.py lo agrega a la imagen.
+;
+; Se entra SIEMPRE por la tabla de saltos, desde CALLP2 en DSKDRV.MAC. CALLP2
+; pone esta pagina en el slot del cartucho y al volver le devuelve la RAM.
+; Mientras una rutina de aca corre, la RAM de la pagina 2 no se ve, y ahi estan
+; el programa BASIC, sus strings literales y sus variables (y el TPA de
+; MSX-DOS). De ahi las reglas:
+;   - Los argumentos de BASIC los lee la pagina 1, que tambien le manda al
+;     firmware los strings. A esta pagina le llegan en registros.
+;   - Nada de rutinas de BASIC (CALBAS, ERRHAND, CHRGTR...): los errores
+;     vuelven en A y los levanta la pagina 1.
+;   - La BIOS (pagina 0) y las variables de sistema (pagina 3) se usan igual.
+
+	INCLUDE	PROTOCOL.INC
+
+CHPUT		EQU		000A2H
+BREAKX		EQU		000B7H
+LINLEN		EQU		0F3B0H
+CSRX		EQU		0F3DDH
+
+;Errores de BASIC que devuelve NEWDSK
+ERR_DISK_IO	EQU		69
+ERR_DISK_OFFLINE	EQU		70
+
+;Consultas a SDFNEW_BUSY antes de rendirse, una por interrupcion de video:
+;3600 son un minuto a 60 Hz. Llenar de ceros una imagen tarda segundos.
+NEW_TIMEOUT	EQU		3600
+
+;Sectores del directorio: 112 entradas de 32 bytes, en los dos formatos
+DIR_SECTORS	EQU		7
+;BPB en el sector de arranque: los bytes 0Bh-1Dh
+BPB_OFS		EQU		0BH
+BPB_LEN		EQU		13H
+
+	ORG		8000H
+
+;Tabla de saltos: el orden es el contrato con los P2_... de DSKDRV.MAC. Una
+;entrada nueva va al final. Empieza con C3 y no con "AB": la BIOS no toma esta
+;pagina por la cabecera de un cartucho.
+	JP		FORMAT			;8000h
+	JP		NEWDSK			;8003h
+	JP		SDFFILES		;8006h
+	JP		SDFTEST			;8009h
+
+;----I/O con el firmware: las mismas que en la pagina 1----
+WriteByte:
+	OUT		(PORT_DATA),A
+	EX 		(SP),HL		;19 cycles
+	EX		(SP),HL		;19 cycles
+	RET
+
+WriteCommand:
+	OUT		(PORT_CMD),A
+	EX		(SP),HL
+	EX		(SP),HL
+	RET
+
+ReadByte:
+	IN		A,(PORT_DATA)
+	EX		(SP),HL
+	EX		(SP),HL
+	RET
+
+; Manda BC bytes desde HL. Deja HL despues del ultimo.
+SendBlock:
+	LD		A,B
+	OR		C
+	RET		Z
+	LD		A,(HL)
+	CALL	WriteByte
+	INC		HL
+	DEC		BC
+	JR		SendBlock
+
+; Manda BC ceros.
+SendZeros:
+	LD		A,B
+	OR		C
+	RET		Z
+	XOR		A
+	CALL	WriteByte
+	DEC		BC
+	JR		SendZeros
+
+; FORMAT
+;
+; Escribe los sectores de sistema de una imagen: el sector de arranque, las dos
+; FAT y el directorio, como pide DISK.MEM para DSKFMT. El formato sale del largo
+; de la imagen, que contesta el firmware. El area de datos no se toca.
+;
+; Input:	A	drive: 0=A, 1=B, NEW_DRIVE la imagen de CALL SDFNEW
+;		HL	plantilla del sector de arranque (BOOT.Z80, en la pagina 1)
+;		BC	largo de la plantilla, entre 1Eh y 512
+; Output:	F	Cx set si hubo error
+;		A	si hubo error, el codigo de DSKFMT: 2 not ready (sin imagen,
+;			o una imagen que no es de 720 ni de 360 KB), 8 o 10
+
+FORMAT:
+	LD		D,A				;drive
+	PUSH	HL				;plantilla
+	PUSH	BC				;largo
+	LD		A,CMD_DSKFMT
+	CALL	WriteCommand
+	LD		A,D
+	CALL	WriteByte
+	CALL	ReadByte		;media de la imagen, 0 si no hay
+	LD		IX,FMT720
+	CP		MEDIA_720K
+	JR		Z,.FMTKNOWN
+	LD		IX,FMT360
+	CP		MEDIA_360K
+	JR		Z,.FMTKNOWN
+	POP		BC
+	POP		HL
+	LD		A,2				;not ready
+	SCF
+	RET
+
+.FMTKNOWN:
+	LD		E,A				;media
+	LD		A,CMD_WRITE		;todos los sectores de sistema en una escritura
+	CALL	WriteCommand
+	LD		A,D				;drive
+	CALL	WriteByte
+	LD		A,(IX+1)		;n-sectors
+	CALL	WriteByte
+	LD		A,E				;media
+	CALL	WriteByte
+	XOR		A
+	CALL	WriteByte		;direccion de transferencia: el firmware no la usa
+	CALL	WriteByte
+	CALL	WriteByte		;desde el sector 0
+	CALL	WriteByte
+	CALL	ReadByte		;estado: 0 ok, si no el error de DSKIO
+	OR		A
+	JR		Z,.FMTBOOT
+	POP		BC
+	POP		HL
+	SCF
+	RET
+
+;Sector de arranque: la plantilla con el BPB del formato, y ceros hasta 512
+.FMTBOOT:
+	POP		BC				;largo de la plantilla
+	POP		HL				;plantilla
+	PUSH	BC
+	LD		BC,BPB_OFS
+	CALL	SendBlock		;salto y nombre OEM, de la plantilla
+	PUSH	HL
+	PUSH	IX
+	POP		HL
+	INC		HL
+	INC		HL
+	INC		HL				;HL = BPB del formato
+	LD		BC,BPB_LEN
+	CALL	SendBlock
+	POP		HL
+	LD		BC,BPB_LEN
+	ADD		HL,BC			;salteo el BPB en blanco de la plantilla
+	POP		BC				;largo de la plantilla
+	PUSH	BC
+	LD		A,C
+	SUB		BPB_OFS+BPB_LEN
+	LD		C,A
+	JR		NC,.FMTCODE
+	DEC		B
+.FMTCODE:
+	CALL	SendBlock		;el codigo de arranque
+	POP		DE				;largo de la plantilla
+	LD		HL,512
+	OR		A
+	SBC		HL,DE
+	LD		B,H
+	LD		C,L
+	CALL	SendZeros		;el resto del sector
+
+;FAT: media, FFh, FFh y ceros, dos copias
+	LD		D,2
+.FMTFAT:
+	LD		A,(IX+0)		;media
+	CALL	WriteByte
+	LD		A,0FFH
+	CALL	WriteByte
+	CALL	WriteByte
+	LD		BC,512-3
+	CALL	SendZeros
+	LD		E,(IX+2)		;sectores por FAT
+.FMTFATREST:
+	DEC		E
+	JR		Z,.FMTNEXTFAT
+	LD		BC,512
+	CALL	SendZeros
+	JR		.FMTFATREST
+.FMTNEXTFAT:
+	DEC		D
+	JR		NZ,.FMTFAT
+
+;Directorio: todo en cero
+	LD		E,DIR_SECTORS
+.FMTDIR:
+	LD		BC,512
+	CALL	SendZeros
+	DEC		E
+	JR		NZ,.FMTDIR
+	OR		A				;carry limpio: formateada
+	RET
+
+;Un formato por tamaño: lo que FORMAT necesita y no esta en el DPB de GETDPB.
+;Tienen que coincidir con DpbTable y Dpb360 de DSKDRV.MAC.
+FMT720:
+	DB		MEDIA_720K		;+0 media
+	DB		1+3+3+DIR_SECTORS	;+1 sectores de sistema
+	DB		3				;+2 sectores por FAT
+	;+3: BPB del sector de arranque, bytes 0Bh-1Dh
+	DW		512				;bytes por sector
+	DB		2				;sectores por cluster
+	DW		1				;sectores reservados
+	DB		2				;cantidad de FATs
+	DW		112				;entradas de directorio
+	DW		1440			;sectores en total
+	DB		MEDIA_720K		;media
+	DW		3				;sectores por FAT
+	DW		9				;sectores por pista
+	DW		2				;caras
+	DW		0				;sectores ocultos
+
+FMT360:
+	DB		MEDIA_360K
+	DB		1+2+2+DIR_SECTORS
+	DB		2
+	DW		512
+	DB		2
+	DW		1
+	DB		2
+	DW		112
+	DW		720
+	DB		MEDIA_360K
+	DW		2
+	DW		9
+	DW		1
+	DW		0
+
+; NEWDSK
+;
+; Termina CALL SDFNEW. La pagina 1 ya le mando al firmware el pedido: el tamaño
+; y el nombre. El firmware crea la imagen y la llena de ceros desde loop(), y
+; mientras tanto contesta SDFNEW_BUSY. Despues aca se le escriben los sectores
+; de sistema, con FORMAT sobre NEW_DRIVE.
+;
+; Input:	HL, BC	plantilla del sector de arranque, como en FORMAT
+; Output:	A	0, o el numero de error de BASIC
+
+NEWDSK:
+	LD		DE,NEW_TIMEOUT
+.NEWWAIT:
+	CALL	ReadByte
+	CP		SDFNEW_BUSY
+	JR		NZ,.NEWDONE
+	HALT					;una interrupcion de video entre consultas
+	DEC		DE
+	LD		A,D
+	OR		E
+	JR		NZ,.NEWWAIT
+	LD		A,ERR_DISK_IO	;el firmware no termina
+	RET
+
+.NEWDONE:
+	CP		0FFH
+	JR		NZ,.NEWRESULT
+	LD		A,ERR_DISK_OFFLINE	;bus flotando: nadie atiende el puerto
+	RET
+
+.NEWRESULT:
+	OR		A
+	RET		NZ				;error de BASIC que manda el firmware
+	LD		A,NEW_DRIVE
+	CALL	FORMAT
+	LD		A,0
+	RET		NC
+	LD		A,ERR_DISK_IO
+	RET
+
+; SDFFILES
+;
+; CALL SDFFILES: lista los .DSK de la raiz de la SD, en columnas de 13
+; caracteres. El firmware manda los nombres 8.3 como ASCIIZ, uno detras del
+; otro, y un nombre vacio al final. CTRL+STOP corta el listado.
+; Conserva HL, el puntero de BASIC.
+
+SDFFILES:
+	PUSH	HL
+	LD		A,CMD_SDFFILES
+	CALL	WriteCommand
+.NEXTDSK:
+	CALL	ReadByte
+	OR		A
+	JR		Z,.ENDLIST		;nombre vacio: no hay mas
+	LD		C,A				;primer caracter del nombre
+	LD		A,(CSRX)		;columna del cursor, 1 = margen izquierdo
+	ADD		A,12			;columna donde terminaria la entrada
+	LD		B,A
+	LD		A,(LINLEN)
+	CP		B
+	CALL	C,CRLF			;no entra en lo que queda de la linea
+	LD		B,13			;ancho de la columna
+	LD		A,C
+.DSKCHAR:
+	CALL	CHPUT
+	DEC		B
+	CALL	ReadByte
+	OR		A
+	JR		NZ,.DSKCHAR
+.PADDING:
+	LD		A,' '			;relleno hasta el ancho de la columna
+	CALL	CHPUT
+	DJNZ	.PADDING
+	CALL	BREAKX			;CTRL+STOP?
+	JR		NC,.NEXTDSK
+.ENDLIST:
+	LD		A,(CSRX)
+	DEC		A
+	CALL	NZ,CRLF			;cierro la ultima linea si quedo a medias
+	POP		HL
+	RET
+
+; SDFTEST
+;
+; CALL SDFTEST: verifica que el firmware conteste y que hable el mismo
+; protocolo que esta ROM, y muestra su version. El firmware manda un byte con
+; su protocolo y despues la version como ASCIIZ.
+; Conserva HL, el puntero de BASIC.
+
+SDFTEST:
+	PUSH	HL
+	LD		A,CMD_SDFTEST
+	CALL	WriteCommand
+	CALL	ReadByte		;version del protocolo del firmware
+	LD		HL,S_NOANSWER
+	CP		0FFH			;bus flotando: nadie atiende el puerto
+	JR		Z,.TESTMSG
+	LD		HL,S_OLDFW
+	OR		A				;firmware sin CMD_SDFTEST: contesta 0
+	JR		Z,.TESTMSG
+	LD		C,A				;protocolo del firmware
+	LD		HL,S_FIRMWARE
+	CALL	PRINTSTR
+	LD		B,32			;tope, por si llega basura sin el 0 final
+.VERCHAR:
+	CALL	ReadByte
+	OR		A
+	JR		Z,.VEREND
+	CALL	CHPUT
+	DJNZ	.VERCHAR
+.VEREND:
+	LD		HL,S_PROTOCOL
+	CALL	PRINTSTR
+	LD		A,C
+	CALL	PRINTHEX
+	CALL	CRLF			;pisa A
+	LD		A,C
+	CP		PROTOCOL
+	JR		Z,.TESTOK
+	LD		HL,S_MISMATCH
+.TESTMSG:
+	CALL	PRINTSTR
+.TESTOK:
+	POP		HL
+	RET
+
+S_NOANSWER:
+	DB		"El firmware no responde (sin SD?)",13,10,0
+S_OLDFW:
+	DB		"Firmware anterior a SDFTEST",13,10,0
+S_FIRMWARE:
+	DB		"Firmware ",0
+S_PROTOCOL:
+	DB		13,10,"Protocolo ",0
+S_MISMATCH:
+	DB		"Distinto al de la ROM!",13,10,0
+
+; Imprime el ASCIIZ apuntado por HL
+PRINTSTR:
+	LD		A,(HL)
+	OR		A
+	RET		Z
+	CALL	CHPUT
+	INC		HL
+	JR		PRINTSTR
+
+CRLF:
+	LD		A,13
+	CALL	CHPUT
+	LD		A,10
+	JP		CHPUT
+
+; Imprime A en hexadecimal, dos digitos
+PRINTHEX:
+	PUSH	AF
+	RRA
+	RRA
+	RRA
+	RRA
+	CALL	.HEXDIGIT
+	POP		AF
+.HEXDIGIT:
+	OR		0F0h
+	DAA
+	ADD 	A,0A0h
+	ADC 	A,040h			;ASCII del 0 a la F
+	JP		CHPUT
+
+	END

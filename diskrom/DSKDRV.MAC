@@ -15,14 +15,12 @@ CHPUT   	EQU     000A2H
 CALBAS		EQU		00159H
 ERRHAND 	EQU     0406FH
 FRMEVL  	EQU     04C64H
+FRMQNT		EQU		0542FH			;evalua una expresion entera, la deja en DE
 CHRGTR  	EQU     04666H
 VALTYP  	EQU     0F663H
 USR     	EQU     0F7F8H
 PROCNM		EQU		0FD89H
-BREAKX		EQU		000B7H
 GETBYT		EQU		0521CH
-LINLEN		EQU		0F3B0H
-CSRX		EQU		0F3DDH
 ;ENASLT  	EQU     00024H          ;enable slot
 ;RSLREG  	EQU     00138H          ;read primary slot select register
 ;RSLGREG 	EQU		00138H
@@ -46,6 +44,10 @@ EXTRN		SETINT,PRVINT
 ; RAWFLG	verify flag
 ; $SECBUF	temporary sectorbuffer
 EXTRN		$SECBUF
+; GETSLOT	slot del cartucho, para poner la pagina 2 (ver CALLP2)
+; ENASLT	habilita un slot en una pagina
+; RAMAD2	slot de la RAM de la pagina 2
+EXTRN		GETSLOT,ENASLT,RAMAD2
 ; XFER		transfer to TPA
 ; DISINT	inform interrupts are being disabled
 ; ENAINT	inform interrupts are being enabled
@@ -97,38 +99,16 @@ MYSIZE		equ	1		; Size of environment
 	PUBLIC	SECLEN
 SECLEN		equ	512		; Size of biggest sector
 
-;----Commands----
-;Agrupados por funcion, un nibble alto por grupo (ver defs.h del firmware):
-;  0DxH diagnostico, 0ExH SD e imagenes DSK, 0FxH driver de disco de MSX-DOS
+;----Protocolo con el firmware: comandos, respuestas y puertos----
+	INCLUDE	PROTOCOL.INC
 
-;Version del protocolo con el firmware: tiene que coincidir con
-;PROTOCOL_VERSION en defs.h. La compara CALL SDFTEST.
-PROTOCOL	EQU		2
-
-;0DxH: diagnostico
-CMD_DEBUG	EQU		0D0H
-CMD_SDFTEST	EQU		0D1H
-;0ExH: SD e imagenes DSK
-CMD_SENDSTR	EQU		0E0H	;de antes de agrupar; hoy no lo usa nadie
-CMD_SDFMOUNT	EQU		0E1H
-CMD_SDFFILES	EQU		0E2H
-CMD_SDFUMOUNT	EQU		0E3H
-;0FxH: driver de disco de MSX-DOS
-CMD_WRITE	EQU		0F0H
-CMD_READ	EQU		0F1H
-CMD_INIHRD	EQU		0F2H
-CMD_INIENV	EQU		0F3H
-CMD_DRIVES	EQU		0F4H
-CMD_DSKCHG	EQU		0F5H
-CMD_CHOICE	EQU		0F6H
-CMD_DSKFMT	EQU		0F7H
-CMD_OEMSTAT	EQU		0F8H
-CMD_MTOFF	EQU		0F9H
-CMD_GETDPB	EQU		0FAH
-
-;----I/O Ports----
-PORT_CMD	EQU		1
-PORT_DATA	EQU		0
+;----Pagina 2----
+;Entradas de la tabla de saltos de PAGE2.MAC, que empieza en 8000h. El orden
+;es el contrato entre los dos archivos. Se llaman con CALLP2.
+P2_FORMAT	EQU		8000H
+P2_NEWDSK	EQU		8003H
+P2_SDFFILES	EQU		8006H
+P2_SDFTEST	EQU		8009H
 
 WriteByte:
 	OUT		(PORT_DATA),A
@@ -416,6 +396,7 @@ GETDPB:
 ; Un DPB por formato, desde el media: son los 18 bytes de [HL+1..HL+18]. Los
 ; dos son de 3,5" y 80 pistas. El firmware lee por sector logico, asi que la
 ; geometria fisica (caras, sectores por pista) no aparece.
+; Si se tocan, tocar tambien FMT720 y FMT360 en PAGE2.MAC.
 
 DpbTable:
 	db		0F9h	; media: 720 KB, doble faz
@@ -461,23 +442,14 @@ DEFDPB		equ	DpbTable
 ; Input: 	None
 ; Output:	HL	pointer to choice string, 0 if no choice
 ; Changed:	AF,BC,DE,HL,IX,IY may be affected
+;
+; Sin menu: una imagen DSK no cambia de largo, asi que DSKFMT la formatea
+; segun el largo que ya tiene.
 
 	PUBLIC	CHOICE
 CHOICE:
-	PUSH	AF
-	LD		A,CMD_CHOICE
-	CALL	WriteCommand
-	POP		AF
-	LD		HL,ChoiceStr
+	LD		HL,0
 	RET
-
-ChoiceStr:	
-	DB		13,10
-	DB		"1 - Choice A",13,10
-	DB		"2 - Choice B",13,10
-	DB		13,10
-	DB		0
-
 
 
 ; DSKFMT
@@ -490,16 +462,66 @@ ChoiceStr:
 ;			Cx reset for ok
 ;		A	if error, errorcode
 ; Changed:	AF,BC,DE,HL,IX,IY may be affected
+;
+; Formatea la imagen montada en el drive: la hace FORMAT en PAGE2.MAC. La
+; eleccion no se usa, porque CHOICE no ofrece menu, ni el area de trabajo.
 
 	PUBLIC	DSKFMT
 DSKFMT:
+	LD		A,D				;drive
+	LD		IX,P2_FORMAT
+				;sigue en CALLBOOT
+
+; CALLBOOT
+;
+; Llama con CALLP2 a una entrada de la pagina 2 que escribe el sector de
+; arranque (FORMAT, NEWDSK): le pasa la plantilla en HL y su largo en BC.
+
+CALLBOOT:
+	LD		HL,BOOTSEC
+	LD		BC,NOTFIRST-0C000H	;largo de la plantilla: ver BOOTSEC, al final
+				;sigue en CALLP2
+
+; CALLP2
+;
+; Llama a la rutina de la pagina 2 cuya entrada esta en IX (P2_...). Pone la
+; pagina 2 en el slot de este cartucho, llama, y la devuelve a la RAM. Pasa
+; AF, BC, DE y HL, y devuelve los de la rutina: ENASLT destruye todo.
+;
+; Mientras la rutina corre, la RAM de la pagina 2 no se ve: nada de lo que
+; la rutina necesite puede estar ahi. Ver PAGE2.MAC.
+
+CALLP2:
+	PUSH	HL
+	PUSH	DE
+	PUSH	BC
 	PUSH	AF
-	LD		A,CMD_DSKFMT
-	CALL	WriteCommand
+	PUSH	IX
+	CALL	GETSLOT			;A = slot de este cartucho
+	LD		H,80H
+	CALL	ENASLT			;pagina 2 = esta EEPROM
+	EI						;ENASLT deja las interrupciones cortadas
+	POP		IX
 	POP		AF
-	LD		A,16
-	SCF
+	POP		BC
+	POP		DE
+	POP		HL
+	CALL	.JPIX
+	PUSH	HL
+	PUSH	DE
+	PUSH	BC
+	PUSH	AF
+	LD		A,(RAMAD2)
+	LD		H,80H
+	CALL	ENASLT			;pagina 2 = RAM otra vez
+	EI
+	POP		AF
+	POP		BC
+	POP		DE
+	POP		HL
 	RET
+.JPIX:
+	JP		(IX)
 
 
 
@@ -573,6 +595,8 @@ CMDS:
 	DEFW	_SDFMOUNT
 	DEFB	"SDFUMOUNT",0
 	DEFW	_SDFUMOUNT
+	DEFB	"SDFNEW",0
+	DEFW	_SDFNEW
 	DEFB	0               ; No more commands
 
 PRINTHEX:
@@ -632,52 +656,19 @@ _FFILES:
 
 ; CALL SDFFILES
 ;
-; Lista los .DSK de la raiz de la SD, en columnas de 13 caracteres.
-; El firmware manda los nombres 8.3 como ASCIIZ, uno detras del otro, y un
-; nombre vacio al final. CTRL+STOP corta el listado.
+; Lista los .DSK de la raiz de la SD. No tiene argumentos: la hace entera
+; SDFFILES en PAGE2.MAC.
 
 _SDFFILES:
-	PUSH	HL
-	LD		A,CMD_SDFFILES
-	CALL	WriteCommand
-.NEXTDSK:
-	CALL	ReadByte
-	OR		A
-	JR		Z,.ENDLIST		;nombre vacio: no hay mas
-	LD		C,A				;primer caracter del nombre
-	LD		A,(CSRX)		;columna del cursor, 1 = margen izquierdo
-	ADD		A,12			;columna donde terminaria la entrada
-	LD		B,A
-	LD		A,(LINLEN)
-	CP		B
-	CALL	C,CRLF			;no entra en lo que queda de la linea
-	LD		B,13			;ancho de la columna
-	LD		A,C
-.DSKCHAR:
-	CALL	CHPUT
-	DEC		B
-	CALL	ReadByte
-	OR		A
-	JR		NZ,.DSKCHAR
-.PADDING:
-	LD		A,' '			;relleno hasta el ancho de la columna
-	CALL	CHPUT
-	DJNZ	.PADDING
-	CALL	BREAKX			;CTRL+STOP?
-	JR		NC,.NEXTDSK
-.ENDLIST:
-	LD		A,(CSRX)
-	DEC		A
-	CALL	NZ,CRLF			;cierro la ultima linea si quedo a medias
-	POP		HL
-	OR		A
-	RET
+	LD		IX,P2_SDFFILES
+	JP		CALLP2
 
 ; CALL SDFMOUNT(drive, "archivo")
 ;
 ; Monta una imagen DSK de la raiz de la SD en el drive indicado, 0=A 1=B.
 ; El firmware valida el pedido y contesta 0 si la monto, o directamente el
 ; numero de error de BASIC a mostrar: asi la ROM no carga con los mensajes.
+; Queda en la pagina 1 porque el nombre puede estar en la RAM de la pagina 2.
 
 _SDFMOUNT:
 	CALL	CHKCHAR
@@ -702,17 +693,10 @@ _SDFMOUNT:
 	POP		AF
 	CALL	WriteByte		;drive
 	CALL	GETSTRPNT		;HL=nombre, B=largo
-	LD		A,B
-	CALL	WriteByte		;largo
-	OR		A
-	JR		Z,SDFRESULT
-.SENDNAME:
-	LD		A,(HL)
-	CALL	WriteByte
-	INC		HL
-	DJNZ	.SENDNAME
+	CALL	SENDNAME
 SDFRESULT:							;final comun de SDFMOUNT y SDFUMOUNT
 	CALL	ReadByte		;0=ok, si no el numero de error de BASIC
+SDFERROR:							;SDFNEW entra aca, con el resultado en A
 	POP		HL				;puntero de BASIC
 	OR		A
 	RET		Z
@@ -742,75 +726,74 @@ _SDFUMOUNT:
 	CALL	WriteByte		;drive
 	JR		SDFRESULT
 
+; CALL SDFNEW("archivo"[, tamaño])
+;
+; Crea en la raiz de la SD una imagen DSK en blanco y formateada, de 720 o de
+; 360 KB segun el tamaño (sin tamaño, 720). No la monta. Si el nombre no tiene
+; extension, el firmware le agrega .DSK.
+; Aca solo se leen los argumentos y se manda el pedido, porque el nombre puede
+; estar en la RAM de la pagina 2. La espera y el formateo los hace NEWDSK en
+; PAGE2.MAC.
+
+_SDFNEW:
+	CALL	CHKCHAR
+	DEFB	"("             ; Check for (
+	LD		IX,FRMEVL		;evalua el nombre
+	CALL	CALBAS
+	LD      A,(VALTYP)
+	CP      3               ; Text type?
+	JP      NZ,TYPE_MISMATCH
+	LD		DE,(USR)		;descriptor del nombre: evaluar el tamaño pisa USR
+	PUSH	DE
+	CALL	GETPREVCHAR		;A = proximo caracter
+	LD		E,MEDIA_720K	;sin tamaño, 720 KB
+	CP		","
+	JR		NZ,.NEWCLOSE
+	CALL	CHKCHAR
+	DEFB	","             ; Check for ,
+	LD		IX,FRMQNT		;evalua el tamaño, entero en DE
+	CALL	CALBAS
+	PUSH	HL				;puntero de BASIC
+	EX		DE,HL			;HL = tamaño
+	LD		E,MEDIA_720K
+	LD		BC,720
+	OR		A
+	SBC		HL,BC
+	JR		Z,.NEWSIZE
+	LD		E,MEDIA_360K
+	LD		BC,360-720		;HL tiene tamaño-720
+	OR		A
+	SBC		HL,BC
+	JP		NZ,ILLEGAL_FUNCTION	;ni 720 ni 360
+.NEWSIZE:
+	POP		HL
+.NEWCLOSE:
+	PUSH	DE				;E = media
+	CALL	CHKCHAR
+	DEFB	")"             ; Check for )
+	POP		DE
+	POP		BC				;descriptor del nombre
+	PUSH	HL				;puntero de BASIC
+	LD		A,CMD_SDFNEW
+	CALL	WriteCommand
+	LD		A,E
+	CALL	WriteByte		;media: el tamaño
+	LD		H,B
+	LD		L,C
+	CALL	STRDESC			;HL=nombre, B=largo
+	CALL	SENDNAME
+	LD		IX,P2_NEWDSK	;espera al firmware y formatea la imagen
+	CALL	CALLBOOT		;A = 0 o el numero de error de BASIC
+	JP		SDFERROR
+
 ; CALL SDFTEST
 ;
-; Diagnostico: verifica que el firmware conteste y que hable el mismo
-; protocolo que esta ROM, y muestra su version. El firmware manda un byte con
-; su protocolo y despues la version como ASCIIZ.
+; Diagnostico: verifica que el firmware conteste y que hable el mismo protocolo
+; que esta ROM. No tiene argumentos: lo hace entero SDFTEST en PAGE2.MAC.
 
 _SDFTEST:
-	PUSH	HL
-	LD		A,CMD_SDFTEST
-	CALL	WriteCommand
-	CALL	ReadByte		;version del protocolo del firmware
-	LD		HL,S_NOANSWER
-	CP		0FFH			;bus flotando: nadie atiende el puerto
-	JR		Z,.TESTMSG
-	LD		HL,S_OLDFW
-	OR		A				;firmware sin CMD_SDFTEST: contesta 0
-	JR		Z,.TESTMSG
-	LD		C,A				;protocolo del firmware
-	LD		HL,S_FIRMWARE
-	CALL	PRINTSTR
-	LD		B,32			;tope, por si llega basura sin el 0 final
-.VERCHAR:
-	CALL	ReadByte
-	OR		A
-	JR		Z,.VEREND
-	CALL	CHPUT
-	DJNZ	.VERCHAR
-.VEREND:
-	LD		HL,S_PROTOCOL
-	CALL	PRINTSTR
-	LD		A,C
-	CALL	PRINTHEX
-	CALL	CRLF			;pisa A
-	LD		A,C
-	CP		PROTOCOL
-	JR		Z,.TESTOK
-	LD		HL,S_MISMATCH
-.TESTMSG:
-	CALL	PRINTSTR
-.TESTOK:
-	POP		HL
-	OR		A
-	RET
-
-S_NOANSWER:
-	DB		"El firmware no responde (sin SD?)",13,10,0
-S_OLDFW:
-	DB		"Firmware anterior a SDFTEST",13,10,0
-S_FIRMWARE:
-	DB		"Firmware ",0
-S_PROTOCOL:
-	DB		13,10,"Protocolo ",0
-S_MISMATCH:
-	DB		"Distinto al de la ROM!",13,10,0
-
-; Imprime el ASCIIZ apuntado por HL
-PRINTSTR:
-	LD		A,(HL)
-	OR		A
-	RET		Z
-	CALL	CHPUT
-	INC		HL
-	JR		PRINTSTR
-
-CRLF:
-	LD		A,13
-	CALL	CHPUT
-	LD		A,10
-	JP		CHPUT
+	LD		IX,P2_SDFTEST
+	JP		CALLP2
 	
 ; MTOFF
 ;
@@ -826,30 +809,6 @@ MTOFF:
 	POP		AF
 	RET
 
-_STRCMD:
-	PUSH	AF
-	CALL	EVALTXTPARAM	; Evaluate text parameter
-	PUSH	HL
-    CALL    GETSTRPNT
-	CALL	SENDSTR
-	POP		HL
-	POP		AF
-	;OUT		(CMDPORT),A
-	;CALL	DEMORA
-	CALL	WriteCommand
-	OR      A
-	RET
-
-SENDSTR:
-	LD		A,CMD_SENDSTR
-	CALL	WriteCommand
-SENDSTR_LOOP:
-	LD		A,(HL)
-	CALL	WriteByte
-	INC		HL
-	DJNZ	SENDSTR_LOOP
-	RET
-
 ;---------------------------
 GETSTRPNT:
 ; OUT:
@@ -857,6 +816,7 @@ GETSTRPNT:
 ; B  = Lenght
 
 	LD      HL,(USR)
+STRDESC:					;lo mismo, con el descriptor en HL
 	LD      B,(HL)
 	INC     HL
 	LD      E,(HL)
@@ -865,16 +825,17 @@ GETSTRPNT:
 	EX      DE,HL
 	RET
 
-EVALTXTPARAM:
-	CALL	CHKCHAR
-	DEFB	"("             ; Check for (
-	LD		IX,FRMEVL
-	CALL	CALBAS			; Evaluate expression
-	LD      A,(VALTYP)
-	CP      3               ; Text type?
-	JP      NZ,TYPE_MISMATCH
-	CALL	CHKCHAR
-	DEFB	")"             ; Check for )
+; Le manda al firmware el largo y el nombre: HL=nombre, B=largo
+SENDNAME:
+	LD		A,B
+	CALL	WriteByte		;largo
+	OR		A
+	RET		Z
+.SENDCHAR:
+	LD		A,(HL)
+	CALL	WriteByte
+	INC		HL
+	DJNZ	.SENDCHAR
 	RET
 
 CHKCHAR:
@@ -887,6 +848,10 @@ CHKCHAR:
 	INC		HL				; Get next basic char
 	JP		GETPREVCHAR		;sin esto caia en TYPE_MISMATCH
 
+ILLEGAL_FUNCTION:
+	LD		E,5
+	DB		1				;LD BC,nn: saltea el LD E siguiente
+
 TYPE_MISMATCH:
 	LD      E,13
 	DB      1
@@ -896,25 +861,17 @@ SYNTAX_ERROR:
 	LD		IX,ERRHAND		; Call the Basic error handler
 	JP		CALBAS
 
-S_INIHRD:
-	DB	"INIHRD", 13, 10
-S_DRIVES:
-	DB	"DRIVES", 13, 10
-S_INIENV:
-	DB	"INIENV", 13, 10
-S_DSKIO:
-	DB	"DSKIO", 13, 10
-S_DSKCHG:
-	DB	"DSKCHG", 13, 10
-S_GETDPB:
-	DB	"GETDPB", 13, 10
-S_CHOICE:
-	DB	"CHOICE", 13, 10
-S_DSKFMT:
-	DB	"DSKFMT", 13, 10
-S_OEMSTATEMENT:
-	DB	"OEMSTATEMENT", 13, 10
-S_MTOFF:
-	DB	"MTOFF", 13, 10
+; BOOTSEC
+;
+; Plantilla del sector de arranque que escriben DSKFMT y CALL SDFNEW: el
+; BOOT.Z80 del kit de ASCII, el codigo que carga MSXDOS.SYS. Queda en la pagina
+; 1, con el resto del kit, para que la pagina 2 no lleve codigo de terceros.
+; FORMAT (PAGE2.MAC) le completa el BPB, bytes 0Bh-1Dh, segun el formato.
+;
+; Va AL FINAL a proposito: el END de BOOT.Z80 termina el ensamblado de este
+; archivo, asi que nada de lo que siguiera al INCLUDE se ensamblaria. Por lo
+; mismo el largo sale de NOTFIRST, la ultima etiqueta de BOOT.Z80: es una
+; variable de un byte que no hace falta grabar. El Makefile pasa -id build.
 
-	END
+BOOTSEC:
+	INCLUDE	BOOT.Z80

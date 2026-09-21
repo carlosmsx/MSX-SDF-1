@@ -11,16 +11,23 @@ decide unicamente como se grabe el binario.
 La pagina 2 (0x8000-0xBFFF) es un binario absoluto aparte, ensamblado desde
 diskrom/PAGE2.MAC. No lleva nada del kit de ASCII.
 
+La cabecera sale de DOSHEAD del kit, que trae la entrada DEVICE (0x4006) en
+0. La BIOS la lee una sola vez, al arrancar, para saber si el cartucho
+atiende dispositivos de BASIC: si se le pasa la lista de simbolos del link,
+este script escribe ahi la direccion de OEMDEV (DSKDRV.MAC).
+
 Este script:
   - vuelca el HEX en una imagen de 64 KB rellena con 0xFF
   - si se le pasa, pone el binario de la pagina 2 en 0x8000
+  - si se le pasan los simbolos, completa la entrada DEVICE con OEMDEV
   - verifica que la firma "AB" quede en 0x4000 y en ningun otro lado
   - avisa cuanto espacio libre queda en las paginas 1 y 2
 
 Uso:
-    python tools/mkrom.py out/msxdos.hex out/sdf1.rom [out/page2.bin]
+    python tools/mkrom.py out/msxdos.hex out/sdf1.rom [out/page2.bin [out/msxdos.sym]]
 """
 
+import re
 import sys
 
 ROM_SIZE = 0x10000        # W27C512: 64 KB
@@ -28,6 +35,8 @@ PAGE1 = 0x4000            # donde el BIOS busca una DiskROM
 PAGE2 = 0x8000            # rutinas de manejo, fuera del kit
 PAGE_SIZE = 0x4000
 SIGNATURE = b"AB"         # el BIOS busca 41h 42h exactos
+DEVICE_ENTRY = 0x4006     # entrada DEVICE de la cabecera
+DEVICE_SYMBOL = "OEMDEV"  # la rutina de DSKDRV.MAC que la atiende
 
 
 def read_ihex(path):
@@ -60,12 +69,25 @@ def read_ihex(path):
     return mem
 
 
+def read_symbols(path):
+    """Devuelve {nombre: direccion} de una lista de simbolos formato L80.
+
+    Cada linea trae hasta cuatro columnas "<valor hex> <nombre><tab>".
+    """
+    symbols = {}
+    with open(path, "r") as f:
+        for value, name in re.findall(r"([0-9A-Fa-f]{4}) (\S+)", f.read()):
+            symbols[name.upper()] = int(value, 16)
+    return symbols
+
+
 def main():
-    if len(sys.argv) not in (3, 4):
+    if len(sys.argv) not in (3, 4, 5):
         sys.exit(__doc__.strip())
 
     hex_path, out_path = sys.argv[1], sys.argv[2]
-    page2_path = sys.argv[3] if len(sys.argv) == 4 else None
+    page2_path = sys.argv[3] if len(sys.argv) >= 4 else None
+    sym_path = sys.argv[4] if len(sys.argv) == 5 else None
     mem = read_ihex(hex_path)
     if not mem:
         sys.exit("mkrom: %s no contiene datos" % hex_path)
@@ -115,6 +137,28 @@ def main():
         rom[PAGE2:PAGE2 + len(page2)] = page2
         outside = [a for a in outside if not (PAGE2 <= a < PAGE2 + PAGE_SIZE)]
 
+    # --- Entrada DEVICE -------------------------------------------------
+    # Sin OEMDEV en el driver, la entrada queda en 0 y BASIC no le pregunta
+    # nada al cartucho. Con OEMDEV: BASIC la llama por CALSLT con la pagina 2
+    # en RAM, porque ahi puede estar el FCB, asi que tiene que estar en la
+    # pagina 1. Y la entrada tiene que venir en 0 del kit; si no, alguien ya
+    # la usa.
+    device = None
+    if sym_path:
+        device = read_symbols(sym_path).get(DEVICE_SYMBOL)
+    if device is not None:
+        if not (PAGE1 <= device < PAGE1 + PAGE_SIZE):
+            sys.exit(
+                "mkrom: %s esta en 0x%04X, fuera de la pagina 1.\n"
+                "        BASIC la llama con la pagina 2 en RAM." % (DEVICE_SYMBOL, device))
+        found = rom[DEVICE_ENTRY:DEVICE_ENTRY + 2]
+        if found != b"\x00\x00":
+            sys.exit(
+                "mkrom: la entrada DEVICE (0x%04X) vale %s y DOSHEAD la trae en 0."
+                % (DEVICE_ENTRY, bytes(found).hex(" ")))
+        rom[DEVICE_ENTRY] = device & 0xFF
+        rom[DEVICE_ENTRY + 1] = device >> 8
+
     # --- Verificaciones que atrapan el error mas caro ------------------
     # Sin la firma correcta el BIOS saltea el slot entero: la placa puede
     # estar perfecta y el MSX no hace absolutamente nada.
@@ -145,6 +189,9 @@ def main():
         print("       pagina 2 0x%04X - 0x%04X  (%d bytes, %d libres)"
               % (PAGE2, PAGE2 + len(page2) - 1, len(page2),
                  PAGE_SIZE - len(page2)))
+    if device is not None:
+        print("       device   %s en 0x%04X, escrito en 0x%04X"
+              % (DEVICE_SYMBOL, device, DEVICE_ENTRY))
     print("       firma    AB en 0x4000, unica")
     if outside:
         print("       datos    %d bytes en 0x%04X-0x%04X, fuera de la ROM "

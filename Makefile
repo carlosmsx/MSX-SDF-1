@@ -141,8 +141,12 @@ $(OUT)/DSKDRV.REL: $(DRIVER) $(PROTO) $(KIT)/BOOT.Z80 | $(OUT)
 # Son variables de sistema de MSX-DOS con direccion fija; corridas, la maquina
 # muestra el logo, hace un beep y se reinicia. Con esto el link reproduce byte
 # a byte, en todo el codigo, la ROM de ZiggyBox armada con M80/L80.
+#
+# --symbols-file: la lista de simbolos publicos con su direccion. mkrom.py la
+# lee para escribir la entrada DEVICE de la cabecera (ver el paso 4).
 LK80_ARGS = --code $(CODE_ORG) --data $(DATA_ORG) \
             $(REL_KIT) $(OUT)/DSKDRV.REL --data $(DATA_ORG2) $(REL_KIT2) \
+            --symbols-file $(OUT)/msxdos.sym \
             --output-format hex --output-file
 $(OUT)/msxdos.hex: $(OUT)/DSKDRV.REL
 	$(LK80) $(LK80_ARGS) $@
@@ -155,10 +159,11 @@ $(OUT)/page2.bin: $(PAGE2) $(PROTO) | $(OUT)
 	$(N80) $(PAGE2) $@ -bt abs
 
 # --- 4. Armar la imagen de EEPROM ---------------------------------------
-# Ubica el codigo de las dos paginas, rellena los 64 KB con FF y verifica la
-# firma "AB".
+# Ubica el codigo de las dos paginas, rellena los 64 KB con FF, escribe en la
+# cabecera la entrada DEVICE (que DOSHEAD trae en 0) con la direccion de
+# OEMDEV, y verifica la firma "AB". msxdos.sym sale del link, junto al HEX.
 $(OUT)/sdf1.rom: $(OUT)/msxdos.hex $(OUT)/page2.bin tools/mkrom.py
-	$(PYTHON) tools/mkrom.py $< $@ $(OUT)/page2.bin
+	$(PYTHON) tools/mkrom.py $< $@ $(OUT)/page2.bin $(OUT)/msxdos.sym
 
 clean:
 	@$(PYTHON) -c "import shutil; shutil.rmtree(r'$(OUT)', ignore_errors=True)"

@@ -20,6 +20,10 @@ CHRGTR  	EQU     04666H
 VALTYP  	EQU     0F663H
 USR     	EQU     0F7F8H
 PROCNM		EQU		0FD89H
+PTRFIL		EQU		0F864H			;puntero al FCB del archivo en uso
+FILNAM		EQU		0F866H			;nombre 8.3, 11 bytes con espacios
+DEVICE		EQU		0FD99H			;ID del dispositivo que BASIC esta llamando
+PUTINT		EQU		02E9AH			;A con signo -> DAC, para el EOF
 GETBYT		EQU		0521CH
 ;ENASLT  	EQU     00024H          ;enable slot
 ;RSLREG  	EQU     00138H          ;read primary slot select register
@@ -42,8 +46,7 @@ EXTRN		GETWRK          ;get base  of  work  area  in  [IX]  and
 EXTRN		SETINT,PRVINT
 ; PROMPT	prompt for phantom drive
 ; RAWFLG	verify flag
-; $SECBUF	temporary sectorbuffer
-EXTRN		$SECBUF
+; $SECBUF	temporary sectorbuffer (no se usa: lo pedia CALL FFILES)
 ; GETSLOT	slot del cartucho, para poner la pagina 2 (ver CALLP2)
 ; ENASLT	habilita un slot en una pagina
 ; RAMAD2	slot de la RAM de la pagina 2
@@ -584,10 +587,10 @@ CMDS:
 ; List of available commands (as ASCIIZ) and execute address (as word)
 
 	;diagnostico
-	DEFB	"FFILES",0
-	DEFW	_FFILES
 	DEFB	"SDFTEST",0
 	DEFW	_SDFTEST
+	DEFB	"SDFDEBUG",0
+	DEFW	_SDFDEBUG
 	;SD e imagenes DSK
 	DEFB	"SDFFILES",0
 	DEFW	_SDFFILES
@@ -597,62 +600,143 @@ CMDS:
 	DEFW	_SDFUMOUNT
 	DEFB	"SDFNEW",0
 	DEFW	_SDFNEW
+	;reloj
+	DEFB	"RTC",0
+	DEFW	_RTC
 	DEFB	0               ; No more commands
 
-PRINTHEX:
-	PUSH	AF
-	PUSH	AF
-    CALL 	_Num1
-	CALL	CHPUT
-	POP		AF
-	CALL 	_Num2
-	CALL	CHPUT
-	POP		AF
-	RET  	; return with hex number in de
-_Num1:
-	RRA
-	RRA
-	RRA
-	RRA
-_Num2:       
-	OR		0F0h
-	DAA
-	ADD 	A,0A0h
-	ADC 	A,040h ; Ascii hex at this point (0 to F)   
-	RET	
+; CALL SDFDEBUG
+;
+; Imprime lo que el firmware haya dejado en su buffer de depuracion, hasta el 0
+; final, y lo vacia. Es para mandar texto desde el ATmega mientras se prueba
+; algo: alla se escribe con dbg("lo que sea"). Sin mensajes no imprime nada.
+;
+; Reemplazo de CALL FFILES, que imprimia la direccion de enlace de $SECBUF y
+; tres lineas en blanco, y ya no le servia a nadie.
 
-_FFILES:
-	PUSH	HL
-	LD		HL,$SECBUF
-	LD		A,H
-	CALL	PRINTHEX
-	LD		A,L
-	CALL	PRINTHEX
-	LD		A,13
+_SDFDEBUG:
+	PUSH	HL				;puntero de BASIC
+	LD		A,CMD_SDFDEBUG
+	CALL	WriteCommand
+	LD		B,0				;tope de 256: sin firmware el bus flotando no termina
+.DBGCHAR:
+	CALL	ReadByte
+	OR		A
+	JR		Z,.DBGEND
+	PUSH	BC
 	CALL	CHPUT
-	LD		A,10
-	CALL	CHPUT
-;	LD		HL,PR_LEN
-;	LD		A,H
-;	CALL	PRINTHEX
-;	LD		A,L
-;	CALL	PRINTHEX
-	LD		A,13
-	CALL	CHPUT
-	LD		A,10
-	CALL	CHPUT
-;	LD		HL,PW_LEN
-;	LD		A,H
-;	CALL	PRINTHEX
-;	LD		A,L
-;	CALL	PRINTHEX
-	LD		A,13
-	CALL	CHPUT
-	LD		A,10
-	CALL	CHPUT
+	POP		BC
+	DJNZ	.DBGCHAR
+.DBGEND:
 	POP		HL
 	OR		A
 	RET
+
+; CALL RTC
+; CALL RTC("2026-09-20 19:05:00")
+;
+; Sin argumento muestra la fecha y la hora; con un texto pone el reloj. Las dos
+; usan el mismo tubo que OPEN "RTC:" (dispositivo 0), asi que el formato de
+; salida y el parseo de la fecha siguen viviendo en el firmware: esto es solo
+; comodidad para el prompt.
+
+_RTC:
+	CP		"("				;OEMSTATEMENT ya dejo el caracter actual en A
+	JR		Z,_RTCSET
+
+	PUSH	HL				;puntero de BASIC
+	LD		E,1				;FOR INPUT
+	CALL	RTCOPEN
+	LD		B,40			;la linea mas larga que arma el firmware son 22
+.RTCCHAR:
+	LD		A,CMD_DEVIN
+	CALL	WriteCommand
+	CALL	ReadByte
+	OR		A
+	JR		Z,.RTCEND			;fin de datos
+	CP		13
+	JR		Z,.RTCEND			;fin de linea
+	PUSH	BC
+	CALL	CHPUT
+	POP		BC
+	DJNZ	.RTCCHAR
+.RTCEND:
+	LD		A,13
+	CALL	CHPUT
+	LD		A,10
+	CALL	CHPUT
+	LD		E,1
+	CALL	RTCCLOSE
+	POP		HL
+	OR		A
+	RET
+
+_RTCSET:
+	CALL	CHKCHAR
+	DEFB	"("             ; Check for (
+	LD		IX,FRMEVL		;evalua el texto
+	CALL	CALBAS
+	LD      A,(VALTYP)
+	CP      3               ; Text type?
+	JP      NZ,TYPE_MISMATCH
+	CALL	CHKCHAR
+	DEFB	")"             ; Check for )
+	PUSH	HL				;puntero de BASIC
+	LD		E,2				;FOR OUTPUT
+	CALL	RTCOPEN
+	CALL	GETSTRPNT		;HL=texto, B=largo
+	LD		A,B
+	OR		A
+	JR		Z,.SETEOL			;texto vacio: que conteste el firmware
+.SETCHAR:
+	LD		A,CMD_DEVOUT
+	CALL	WriteCommand
+	LD		A,(HL)
+	INC		HL
+	CALL	WriteByte
+	DJNZ	.SETCHAR
+.SETEOL:
+	LD		A,CMD_DEVOUT
+	CALL	WriteCommand
+	LD		A,13			;el CR cierra la linea y la ejecuta
+	CALL	WriteByte
+.SETWAIT:
+	CALL	ReadByte		;mientras escribe el chip contesta DEV_BUSY
+	CP		DEV_BUSY
+	JR		Z,.SETWAIT
+	PUSH	AF
+	LD		E,2
+	CALL	RTCCLOSE
+	POP		AF
+	POP		HL				;puntero de BASIC
+	OR		A
+	RET		Z
+	JP		DEVERR			;el firmware manda el numero de error de BASIC
+
+; Abre y cierra el dispositivo 0 (RTC) sin texto tras los dos puntos. E = modo,
+; 1 entrada y 2 salida, como en el OPEN de BASIC.
+
+RTCOPEN:
+	LD		A,CMD_DEVOPEN
+	CALL	WriteCommand
+	XOR		A
+	CALL	WriteByte		;ID 0
+	LD		A,E
+	CALL	WriteByte		;modo
+	XOR		A
+	CALL	WriteByte		;sin texto tras los ":"
+	CALL	ReadByte
+	OR		A
+	RET		Z
+	JP		DEVERR
+
+RTCCLOSE:
+	LD		A,CMD_DEVCLOSE
+	CALL	WriteCommand
+	XOR		A
+	CALL	WriteByte		;ID 0
+	LD		A,E
+	JP		WriteByte		;modo
 
 ; CALL SDFFILES
 ;
@@ -859,6 +943,216 @@ TYPE_MISMATCH:
 SYNTAX_ERROR:
 	LD      E,2
 	LD		IX,ERRHAND		; Call the Basic error handler
+	JP		CALBAS
+
+;=======================================================================
+; OEMDEV — dispositivo de BASIC (entrada DEVICE de la cabecera)
+;=======================================================================
+;
+; La entrada DEVICE (4006h) viene en 0 desde DOSHEAD: la escribe mkrom.py con
+; la direccion de este simbolo. Tiene que estar en la PAGINA 1: BASIC llama por
+; CALSLT con la pagina 2 en RAM, porque ahi puede estar el FCB.
+;
+; Entra con:
+;   A = FFh          reconocer un nombre. El nombre, sin los ":" y en
+;                    mayusculas, esta en PROCNM. Contestar el ID (0-3) con
+;                    carry en 0, o carry en 1 si no es nuestro.
+;   A = 0,2,...,18   funcion, HL = FCB, (DEVICE) = el ID que dimos.
+;                    0 OPEN, 2 CLOSE, 4 aleatorio, 6 salida, 8 entrada,
+;                    10 LOC, 12 LOF, 14 EOF, 16 FPOS, 18 devolver caracter.
+;
+; La ROM no sabe que dispositivos existen: le pasa el nombre al firmware y
+; despues hace de tubo de bytes. Un dispositivo nuevo (I2C:, GPIO:...) es
+; firmware, no ROM. El texto que va despues de los ":" viaja en el OPEN: con
+; el, "RTC:N" puede contestar otro formato que "RTC:".
+;
+; El byte FCB+6 guarda el caracter devuelto por la funcion 18, como hace CAS.
+
+	PUBLIC	OEMDEV
+OEMDEV:
+	INC		A
+	JR		Z,DEVFIND		;era FFh: reconocer el nombre
+	DEC		A
+
+	PUSH	HL				;el FCB, para el que atienda
+	CP		20
+	JP		NC,DEVILL		;funcion que no existe
+	RRCA					;las funciones son pares: /2 es el indice
+	LD		L,A
+	LD		H,0
+	ADD		HL,HL
+	PUSH	DE				;OJO: DE es del llamador. El OPEN lee el modo en E y el
+	LD		DE,DEVFN		;codigo en D, asi que armar el indice lo pisaba
+	ADD		HL,DE
+	LD		A,(HL)
+	INC		HL
+	LD		H,(HL)
+	LD		L,A
+	POP		DE
+	EX		(SP),HL			;la rutina queda en la pila y HL vuelve a ser el FCB
+	RET						;"salta" a la rutina, que vuelve al llamador
+
+DEVFN:
+	DEFW	DEVOPEN			;0
+	DEFW	DEVCLOSE		;2
+	DEFW	DEVILL			;4  aleatorio: como CRT/LPT, error 58
+	DEFW	DEVOUT			;6
+	DEFW	DEVIN			;8
+	DEFW	DEVPOS			;10 LOC
+	DEFW	DEVPOS			;12 LOF
+	DEFW	DEVEOF			;14
+	DEFW	DEVPOS			;16 FPOS
+	DEFW	DEVBACK			;18
+
+; Reconocer el nombre: se lo pasamos al firmware tal cual viene en PROCNM.
+DEVFIND:
+	LD		A,CMD_DEVNAME
+	CALL	WriteCommand
+	LD		HL,PROCNM
+.send:
+	LD		A,(HL)
+	INC		HL
+	CALL	WriteByte
+	OR		A
+	JR		NZ,.send		;incluido el 0 final
+	CALL	ReadByte
+	CP		4				;0-3 es nuestro; 0FFh (o el bus flotando) no
+	CCF
+	RET
+
+; Funcion 0 — OPEN. E = modo (1 entrada, 2 salida, 4 aleatorio, 8 append),
+; D = codigo de dispositivo. Hay que dejar el modo en (HL) y el FCB en PTRFIL.
+DEVOPEN:
+	LD		(HL),E
+	LD		(PTRFIL),HL
+	PUSH	HL
+	PUSH	DE
+
+	LD		A,CMD_DEVOPEN
+	CALL	WriteCommand
+	LD		A,(DEVICE)
+	CALL	WriteByte
+	POP		DE
+	LD		A,E
+	CALL	WriteByte		;el modo
+
+	;FILNAM son 11 bytes rellenados con espacios: mando solo lo util
+	LD		HL,FILNAM+10
+	LD		B,11
+.trim:
+	LD		A,(HL)
+	CP		' '
+	JR		NZ,.len
+	DEC		HL
+	DJNZ	.trim
+.len:
+	LD		A,B
+	CALL	WriteByte		;largo, 0 si no hay texto tras los ":"
+	OR		A
+	JR		Z,.done
+	LD		HL,FILNAM
+.name:
+	LD		A,(HL)
+	INC		HL
+	CALL	WriteByte
+	DJNZ	.name
+.done:
+	CALL	ReadByte		;0, o el error de BASIC que quiere el firmware
+	POP		HL
+	OR		A
+	JR		NZ,DEVERR
+
+	;el caracter devuelto por la funcion 18 arranca vacio
+	LD		DE,6
+	ADD		HL,DE
+	LD		(HL),0
+	RET
+
+; Funcion 2 — CLOSE.
+DEVCLOSE:
+	LD		A,(HL)			;el modo que dejo el OPEN en el FCB: sin el, cerrar
+	PUSH	AF				;el archivo de entrada cerraria tambien el de salida
+	LD		A,CMD_DEVCLOSE
+	CALL	WriteCommand
+	LD		A,(DEVICE)
+	CALL	WriteByte
+	POP		AF
+	JP		WriteByte
+
+; Funcion 6 — salida secuencial, C = caracter. El CR cierra la linea: ahi el
+; firmware la ejecuta y contesta. El llamador restaura todos los registros.
+DEVOUT:
+	LD		A,CMD_DEVOUT
+	CALL	WriteCommand
+	LD		A,C
+	CALL	WriteByte
+	CP		13
+	RET		NZ
+.wait:
+	CALL	ReadByte		;mientras trabaja contesta DEV_BUSY
+	CP		DEV_BUSY
+	JR		Z,.wait
+	OR		A
+	RET		Z
+	JR		DEVERR
+
+; Funcion 8 — entrada secuencial. Devuelve el caracter en A, o carry si no hay
+; mas datos. El 0 del firmware es el fin de datos: el texto no lleva ceros.
+DEVIN:
+	LD		DE,6
+	ADD		HL,DE
+	LD		A,(HL)			;caracter devuelto por la funcion 18
+	OR		A
+	JR		Z,.fw
+	LD		(HL),0
+	RET						;A el caracter, carry en 0
+
+.fw:
+	LD		A,CMD_DEVIN
+	CALL	WriteCommand
+	CALL	ReadByte
+	OR		A
+	RET		NZ				;hay caracter, carry en 0
+	SCF
+	RET						;fin de datos
+
+; Funcion 14 — EOF. Ademas del fin de datos, el firmware lo usa para avisar que
+; lo que va a leerse no es confiable (el reloj nunca puesto, por ejemplo).
+DEVEOF:
+	LD		A,CMD_DEVEOF
+	CALL	WriteCommand
+	CALL	ReadByte
+	OR		A
+	JR		Z,.put
+	LD		A,0FFH			;-1, cualquier cosa distinta de 0 es "si"
+.put:
+	JP		PUTINT
+
+; Funcion 18 — devolver un caracter, C. Uno por archivo, en FCB+6, como CAS.
+DEVBACK:
+	LD		DE,6
+	ADD		HL,DE
+	LD		(HL),C
+	RET
+
+; Funciones 10, 12 y 16 — LOC, LOF y FPOS: como CRT, LPT y CAS, error 5.
+DEVPOS:
+	LD		A,5
+	JR		DEVERR
+
+; Funcion 4 — aleatorio: como CRT y LPT, error 58.
+DEVILL:
+	LD		A,58
+
+; Error de BASIC en A. Con el bit 7 puesto no es un error: es el bus flotando
+; o un firmware que no entiende el comando.
+DEVERR:
+	CP		128
+	JR		C,.go
+	LD		A,ERR_DEVICE_IO
+.go:
+	LD		E,A
+	LD		IX,ERRHAND
 	JP		CALBAS
 
 ; BOOTSEC

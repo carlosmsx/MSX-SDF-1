@@ -221,6 +221,38 @@ void umountDisk(uint8_t drive)
 
 // Arma el texto de CALL SDFTEST: la version y, en otra linea, el estado de la
 // SD. La ROM lo imprime tal cual despues de "Firmware ".
+// ---- Mensajes de prueba hacia el MSX ---------------------------------
+//
+// CALL SDFDEBUG imprime esto y lo vacia. Para dejar un mensaje desde
+// cualquier punto del firmware:
+//
+//     dbg("monte ");  dbg(_mount_name);  dbg("\r\n");
+//     dbg("estado "); dbgHex(_io_status); dbg("\r\n");
+//
+// Se puede llamar desde loop() y desde la ISR; si las dos escriben a la vez el
+// texto sale mezclado, que para una herramienta de prueba alcanza. Lo que no
+// entra se descarta: nunca se pasa del buffer.
+char _dbg_msg[DEBUG_MSG_MAX];
+volatile uint8_t _dbg_len = 0;
+volatile uint8_t _dbg_idx = 0;
+
+void dbg(const char *s)
+{
+  while (*s && _dbg_len < DEBUG_MSG_MAX - 1)
+    _dbg_msg[_dbg_len++] = *s++;
+  _dbg_msg[_dbg_len] = 0;
+}
+
+void dbgHex(uint8_t b)
+{
+  static const char hex[] = "0123456789ABCDEF";
+  char t[3];
+  t[0] = hex[b >> 4];
+  t[1] = hex[b & 0x0F];
+  t[2] = 0;
+  dbg(t);
+}
+
 void buildTestMsg()
 {
   strcpy(_test_msg, FW_VERSION "\r\nSD ");
@@ -396,6 +428,387 @@ inline void configDataBusAsOutput()
   DDRD = 0xff; //puts bits 0-7 as outputs
 }
 
+/* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ * Dispositivos de BASIC (OPEN "RTC:") y reloj DS1307                        *
+ * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+ *
+ * La ROM es un tubo: pregunta si un nombre es nuestro (CMD_DEVNAME) y despues
+ * pasa bytes. Todo lo que distingue a un dispositivo de otro esta aca, asi que
+ * agregar "I2C:" o "GPIO:" es firmware y no obliga a regrabar la EEPROM.
+ *
+ * REGLA: nada de I2C dentro de la ISR. El MSX espera en /WAIT mientras corre,
+ * y una transaccion I2C son cientos de microsegundos sin refresco de DRAM.
+ *  - lectura: loop() relee el DS1307 cuatro veces por segundo a una copia en
+ *    RAM y la ISR arma la linea desde ahi, sin dividir ni llamar a sprintf.
+ *  - escritura: la ISR deja el pedido y contesta DEV_BUSY hasta que loop()
+ *    termina, igual que CALL SDFNEW.
+ */
+
+// Los siete registros del reloj, en BCD tal como salen del chip: asi armar la
+// linea es partir nibbles, sin una sola division.
+struct RtcRegs { uint8_t s, mi, h, wd, d, mo, y; };
+
+// Copia doble: loop() llena la que la ISR no esta mirando y recien despues
+// cambia el indice. El cambio es de un byte, o sea atomico en el AVR, asi que
+// la ISR nunca ve media hora vieja y media nueva.
+RtcRegs _rtc_buf[2];
+volatile uint8_t _rtc_cur = 0;
+volatile bool _rtc_ok = false;   //el chip contesta
+volatile bool _rtc_set = false;  //...y ademas esta andando (CH en 0)
+uint32_t _rtc_next_ms = 0;
+
+RtcRegs _rtc_pending;                   //lo que pidio PRINT #, para loop()
+volatile bool _rtc_write_req = false;
+
+// Estado del tubo. Entrada y salida son independientes: se puede tener un
+// archivo FOR INPUT y otro FOR OUTPUT sobre el mismo dispositivo.
+volatile uint8_t _dev_in_id = DEV_NONE, _dev_out_id = DEV_NONE;
+volatile uint8_t _dev_in_fmt = RTC_FMT_FULL;
+char _dev_line[DEV_LINE_MAX];           //linea armada para el MSX
+volatile uint8_t _dev_in_idx = 0xFF;    //0xFF = hay que armarla de nuevo
+char _dev_out[DEV_LINE_MAX];            //linea que llega de PRINT #
+volatile uint8_t _dev_out_idx = 0;
+volatile uint8_t _dev_out_res = 0;
+char _dev_name[DEV_NAME_MAX + 1];       //nombre del dispositivo, o texto tras ":"
+volatile uint8_t _dev_name_idx = 0;
+volatile uint8_t _dev_open_id, _dev_open_mode, _dev_open_len, _dev_open_res;
+
+inline uint8_t bcd2bin(uint8_t b) { return (b >> 4) * 10 + (b & 0x0F); }
+inline uint8_t bin2bcd(uint8_t b) { return ((b / 10) << 4) | (b % 10); }
+
+// ---- I2C a mano, sin la libreria Wire ---------------------------------
+//
+// Wire cuesta 324 bytes de RAM (cinco buffers de 32 y el objeto) y ~2 KB de
+// flash, y aca se usa para leer siete registros cuatro veces por segundo. Con
+// el TWI en crudo no hace falta un solo byte de buffer. La RAM importa: el
+// peor caso de stack es la ISR entrando sobre initSD (GUIA §2).
+//
+// Solo corre desde loop(). La ISR del MSX puede interrumpirlo: no toca ningun
+// registro del TWI, asi que lo unico que pasa es que una transaccion tarde
+// unos microsegundos mas.
+
+#define TWI_SCL_HZ    100000UL
+#define TWI_TIMEOUT   10000     //vueltas de espera, unos pocos ms
+
+void twiInit()
+{
+  PORTC |= _BV(PC4) | _BV(PC5);  //pull-ups internos, por si el modulo no trae
+  TWSR = 0;                      //preescaler 1
+  TWBR = ((F_CPU / TWI_SCL_HZ) - 16) / 2;
+  TWCR = _BV(TWEN);
+}
+
+static bool twiWait()
+{
+  for (uint16_t n = 0; n < TWI_TIMEOUT; n++)
+    if (TWCR & _BV(TWINT))
+      return true;
+  return false;                  //bus trabado: mejor salir que colgar loop()
+}
+
+// Vale para el START y para el START repetido. addr_rw es la direccion ya
+// corrida un bit, con el bit 0 en 1 para leer.
+static bool twiStart(uint8_t addr_rw)
+{
+  TWCR = _BV(TWINT) | _BV(TWSTA) | _BV(TWEN);
+  if (!twiWait())
+    return false;
+  TWDR = addr_rw;
+  TWCR = _BV(TWINT) | _BV(TWEN);
+  if (!twiWait())
+    return false;
+  uint8_t st = TWSR & 0xF8;
+  return st == 0x18 || st == 0x40;  //SLA+W o SLA+R contestados con ACK
+}
+
+static bool twiWrite(uint8_t b)
+{
+  TWDR = b;
+  TWCR = _BV(TWINT) | _BV(TWEN);
+  if (!twiWait())
+    return false;
+  return (TWSR & 0xF8) == 0x28;
+}
+
+static uint8_t twiRead(bool ack)
+{
+  TWCR = _BV(TWINT) | _BV(TWEN) | (ack ? _BV(TWEA) : 0);
+  if (!twiWait())
+    return 0xFF;
+  return TWDR;
+}
+
+static void twiStop()
+{
+  TWCR = _BV(TWINT) | _BV(TWSTO) | _BV(TWEN);
+}
+
+// ---- El reloj, solo desde loop() --------------------------------------
+
+void rtcPoll()
+{
+  if ((int32_t)(millis() - _rtc_next_ms) < 0)
+    return;
+  _rtc_next_ms = millis() + RTC_POLL_MS;
+
+  if (!twiStart(DS1307_ADDR << 1) || !twiWrite(0) ||
+      !twiStart((DS1307_ADDR << 1) | 1))
+  {
+    twiStop();
+    _rtc_ok = false;
+    return;
+  }
+
+  uint8_t next = 1 - _rtc_cur;
+  RtcRegs &r = _rtc_buf[next];
+  uint8_t s = twiRead(true);
+  r.s  = s & 0x7F;
+  r.mi = twiRead(true) & 0x7F;
+  uint8_t h = twiRead(true);
+  if (h & 0x40)  //el chip quedo en 12 horas: lo paso a 24 para armar la linea
+    r.h = bin2bcd(bcd2bin(h & 0x1F) % 12 + ((h & 0x20) ? 12 : 0));
+  else
+    r.h = h & 0x3F;
+  r.wd = twiRead(true) & 0x07;
+  r.d  = twiRead(true) & 0x3F;
+  r.mo = twiRead(true) & 0x1F;
+  r.y  = twiRead(false);
+  twiStop();
+
+  _rtc_cur = next;
+  _rtc_ok = true;
+  _rtc_set = !(s & 0x80);  //CH en 1: el reloj esta parado, nunca lo pusieron
+}
+
+// Dia de la semana (1 domingo .. 7 sabado) por Sakamoto. Va en loop() y no en
+// la ISR porque son cuatro divisiones.
+uint8_t rtcWeekday(uint8_t y2, uint8_t m, uint8_t d)
+{
+  static const uint8_t t[] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+  uint16_t y = 2000 + y2;
+  if (m < 3) y--;
+  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7 + 1;
+}
+
+void rtcWrite()
+{
+  RtcRegs r;
+  noInterrupts();            //la ISR podria estar dejando otro pedido
+  r = _rtc_pending;
+  _rtc_write_req = false;
+  interrupts();
+
+  r.wd = rtcWeekday(bcd2bin(r.y), bcd2bin(r.mo), bcd2bin(r.d));
+
+  bool ok = twiStart(DS1307_ADDR << 1) &&
+            twiWrite(0) &&
+            twiWrite(r.s) &&   //con el bit 7 en 0 el reloj arranca
+            twiWrite(r.mi) &&
+            twiWrite(r.h) &&   //con el bit 6 en 0 queda en 24 horas
+            twiWrite(r.wd) &&
+            twiWrite(r.d) &&
+            twiWrite(r.mo) &&
+            twiWrite(r.y);
+  twiStop();
+  _dev_out_res = ok ? 0 : ERR_DEVICE_IO;
+
+  _rtc_next_ms = 0;  //que la copia se actualice ya, sin esperar el poll
+}
+
+// ---- Armar la linea, desde la ISR -------------------------------------
+
+inline char *put2(char *p, uint8_t bcd)          //siempre dos digitos
+{
+  *p++ = '0' + (bcd >> 4);
+  *p++ = '0' + (bcd & 0x0F);
+  return p;
+}
+
+inline char *putN(char *p, uint8_t bcd)          //sin ceros a la izquierda
+{
+  if (bcd >> 4)
+    *p++ = '0' + (bcd >> 4);
+  *p++ = '0' + (bcd & 0x0F);
+  return p;
+}
+
+// La linea SIEMPRE termina en CR: es lo que cierra el LINE INPUT. Nunca se
+// devuelve fin de datos, asi que RTC: es un chorro infinito de lineas y cada
+// LINE INPUT trae la hora de ese momento.
+void rtcLine(char *p, uint8_t fmt)
+{
+  static const char dias[] = "DOMLUNMARMIEJUEVIESAB";
+  RtcRegs r = _rtc_buf[_rtc_cur];
+
+  if (fmt == RTC_FMT_NUM)
+  {
+    *p++ = '2'; *p++ = '0';
+    p = put2(p, r.y);   *p++ = ',';
+    p = putN(p, r.mo);  *p++ = ',';
+    p = putN(p, r.d);   *p++ = ',';
+    p = putN(p, r.h);   *p++ = ',';
+    p = putN(p, r.mi);  *p++ = ',';
+    p = putN(p, r.s);   *p++ = ',';
+    *p++ = '0' + (r.wd & 7);
+  }
+  else if (fmt == RTC_FMT_WDAY)
+  {
+    uint8_t w = (r.wd >= 1 && r.wd <= 7) ? r.wd - 1 : 0;
+    for (uint8_t i = 0; i < 3; i++)
+      *p++ = dias[w * 3 + i];
+  }
+  else
+  {
+    if (fmt != RTC_FMT_TIME)
+    {
+      *p++ = '2'; *p++ = '0';
+      p = put2(p, r.y);   *p++ = '-';
+      p = put2(p, r.mo);  *p++ = '-';
+      p = put2(p, r.d);
+    }
+    if (fmt == RTC_FMT_FULL)
+      *p++ = ' ';
+    if (fmt != RTC_FMT_DATE)
+    {
+      p = put2(p, r.h);   *p++ = ':';
+      p = put2(p, r.mi);  *p++ = ':';
+      p = put2(p, r.s);
+    }
+  }
+  *p++ = 13;
+  *p = 0;
+}
+
+// ---- El tubo, desde la ISR --------------------------------------------
+
+uint8_t rtcFormat(const char *txt)
+{
+  switch (txt[0])
+  {
+    case 0:   return RTC_FMT_FULL;
+    case 'D': case 'd': return RTC_FMT_DATE;
+    case 'T': case 't': return RTC_FMT_TIME;
+    case 'N': case 'n': return RTC_FMT_NUM;
+    case 'W': case 'w': return RTC_FMT_WDAY;
+  }
+  return RTC_FMT_BAD;
+}
+
+// El formato tambien se puede pedir pegado al nombre ("RTCN:"), no solo
+// despues de los dos puntos ("RTC:N"). El nombre llega siempre en PROCNM; que
+// FILNAM ya tenga el texto cuando BASIC llama al OPEN esta SIN VERIFICAR, asi
+// que la forma pegada es la que no depende de eso.
+volatile uint8_t _dev_find_fmt = RTC_FMT_FULL;
+
+uint8_t devFind()
+{
+  if (strncmp(_dev_name, "RTC", 3) == 0)
+  {
+    uint8_t f = rtcFormat(&_dev_name[3]);
+    if (f == RTC_FMT_BAD)
+      return DEV_NONE;       //"RTCX" no es de nadie
+    _dev_find_fmt = f;
+    return DEV_RTC;
+  }
+  return DEV_NONE;
+}
+
+
+void devOpen()
+{
+  _cmd_st = CMD_DEVOPEN__RESULT;
+
+  if (_dev_open_id != DEV_RTC)          { _dev_open_res = ERR_DEVICE_IO;     return; }
+  if (_dev_open_mode & DEV_MODE_RANDOM) { _dev_open_res = ERR_BAD_FILE_MODE; return; }
+  if (!_rtc_ok)                         { _dev_open_res = ERR_DEVICE_IO;     return; }
+
+  //sin texto tras los ":", vale el que venia pegado al nombre
+  uint8_t fmt = (_dev_name[0] == 0) ? _dev_find_fmt : rtcFormat(_dev_name);
+  if (fmt == RTC_FMT_BAD)               { _dev_open_res = ERR_BAD_FILE_NAME; return; }
+
+  if (_dev_open_mode & (DEV_MODE_OUTPUT | DEV_MODE_APPEND))
+  {
+    _dev_out_id = DEV_RTC;
+    _dev_out_idx = 0;
+    _dev_out_res = 0;
+  }
+  else
+  {
+    _dev_in_id = DEV_RTC;
+    _dev_in_fmt = fmt;
+    _dev_in_idx = 0xFF;
+  }
+  _dev_open_res = 0;
+}
+
+uint8_t devInByte()
+{
+  if (_dev_in_id != DEV_RTC)
+    return 0;                       //nada abierto: fin de datos
+  if (_dev_in_idx == 0xFF)
+  {
+    rtcLine(_dev_line, _dev_in_fmt);
+    _dev_in_idx = 0;
+  }
+  char c = _dev_line[_dev_in_idx];
+  if (c == 0)
+  {
+    _dev_in_idx = 0xFF;
+    return 0;
+  }
+  _dev_in_idx++;
+  if (c == 13)
+    _dev_in_idx = 0xFF;             //linea entregada: la proxima es hora nueva
+  return c;
+}
+
+uint8_t devEof()
+{
+  //Ademas del fin de datos, avisa que lo que se lea no es confiable: el chip
+  //no contesta, o el reloj nunca se puso.
+  return (_rtc_ok && _rtc_set) ? 0 : 0xFF;
+}
+
+// Parsea la linea que mando PRINT #. Acepta cualquier separador que no sea un
+// digito, asi entran "2026-09-20 14:35:07" y "2026,9,20,14,35,7" igual.
+uint8_t devOutLine()
+{
+  uint16_t n[6];
+  uint8_t cnt = 0;
+  const char *p = _dev_out;
+
+  while (*p && cnt < 6)
+  {
+    if (*p < '0' || *p > '9') { p++; continue; }
+    uint16_t v = 0;
+    while (*p >= '0' && *p <= '9')
+    {
+      v = v * 10 + (*p++ - '0');
+      if (v > 9999)
+        return ERR_ILLEGAL_FUNCTION;
+    }
+    n[cnt++] = v;
+  }
+  if (cnt < 6)
+    return ERR_ILLEGAL_FUNCTION;
+
+  uint16_t y = n[0];
+  if (y >= 2000) y -= 2000;
+  if (y > 99 || n[1] < 1 || n[1] > 12 || n[2] < 1 || n[2] > 31 ||
+      n[3] > 23 || n[4] > 59 || n[5] > 59)
+    return ERR_ILLEGAL_FUNCTION;
+
+  _rtc_pending.y  = bin2bcd(y);
+  _rtc_pending.mo = bin2bcd(n[1]);
+  _rtc_pending.d  = bin2bcd(n[2]);
+  _rtc_pending.h  = bin2bcd(n[3]);
+  _rtc_pending.mi = bin2bcd(n[4]);
+  _rtc_pending.s  = bin2bcd(n[5]);
+  _rtc_pending.wd = 1;                //lo calcula loop()
+  _rtc_write_req = true;
+  return DEV_BUSY;                    //loop() deja el resultado en _dev_out_res
+}
+
 inline byte readDataBusByte()
 {
   //return (PINB & 0x03) | (PIND & 0xfc);
@@ -424,6 +837,9 @@ inline void processCommand(register uint8_t command)
 
   switch (_cmd)
   {
+    case CMD_SDFDEBUG:
+      _dbg_idx = 0;
+      break;
     case CMD_SDFTEST:
       //Serial.println("CMD_SDFTEST");
       buildTestMsg();
@@ -485,6 +901,22 @@ inline void processCommand(register uint8_t command)
     case CMD_GETDPB:
       //Serial.println("CMD_GETDPB");
       break;
+    //0x9x: tubo de dispositivos de BASIC. DEVIN y DEVEOF no llevan parametros
+    //y la ROM los repite antes de cada byte: no pueden reiniciar nada.
+    case CMD_DEVNAME:
+      _dev_name_idx = 0;
+      _dev_name[0] = 0;
+      _cmd_st = CMD_DEVNAME__NAME;
+      break;
+    case CMD_DEVOPEN:
+      _cmd_st = CMD_DEVOPEN__ID;
+      break;
+    case CMD_DEVCLOSE:
+      _cmd_st = CMD_DEVCLOSE__ID;
+      break;
+    case CMD_DEVOUT:
+      _cmd_st = CMD_DEVOUT__LINE;
+      break;
     //default:
       //Serial.println("UNKNOWN COMMAND "+String(hexByte(_cmd)));
   }
@@ -503,6 +935,78 @@ inline void processData(register uint8_t data)
   {
     case CMD_SENDSTR:
       //Serial.print(char(data));
+      break;
+    case CMD_DEVNAME:
+      //llega el nombre como ASCIIZ; uno mas largo que el buffer no es de nadie
+      if (_dev_name_idx < DEV_NAME_MAX)
+        _dev_name[_dev_name_idx++] = data;
+      _dev_name[_dev_name_idx] = 0;
+      break;
+    case CMD_DEVOPEN:
+      switch (_cmd_st)
+      {
+        case CMD_DEVOPEN__ID:
+          _dev_open_id = data;
+          _cmd_st = CMD_DEVOPEN__MODE;
+          break;
+        case CMD_DEVOPEN__MODE:
+          _dev_open_mode = data;
+          _cmd_st = CMD_DEVOPEN__LENGTH;
+          break;
+        case CMD_DEVOPEN__LENGTH:
+          //el texto que va despues de los ":", ya sin los espacios de FILNAM
+          _dev_name_idx = 0;
+          _dev_name[0] = 0;
+          _dev_open_len = data;
+          if (data == 0)
+            devOpen();
+          else
+            _cmd_st = CMD_DEVOPEN__NAME;
+          break;
+        case CMD_DEVOPEN__NAME:
+          if (_dev_name_idx < DEV_NAME_MAX)
+            _dev_name[_dev_name_idx++] = data;
+          _dev_name[_dev_name_idx] = 0;
+          if (--_dev_open_len == 0)
+            devOpen();
+          break;
+      }
+      break;
+    case CMD_DEVCLOSE:
+      //llegan el ID y el modo: sin el modo, cerrar el archivo de entrada
+      //cerraria tambien el de salida del mismo dispositivo
+      if (_cmd_st == CMD_DEVCLOSE__ID)
+      {
+        _dev_open_id = data;
+        _cmd_st = CMD_DEVCLOSE__MODE;
+      }
+      else if (_cmd_st == CMD_DEVCLOSE__MODE)
+      {
+        if (data & (DEV_MODE_OUTPUT | DEV_MODE_APPEND))
+        {
+          if (_dev_open_id == _dev_out_id) { _dev_out_id = DEV_NONE; _dev_out_idx = 0; }
+        }
+        else if (_dev_open_id == _dev_in_id) { _dev_in_id = DEV_NONE; _dev_in_idx = 0xFF; }
+        _cmd_st = 0;
+      }
+      break;
+    case CMD_DEVOUT:
+      if (_dev_out_id == DEV_NONE)
+      {
+        _dev_out_res = ERR_DEVICE_IO;
+        break;
+      }
+      if (data == 10)
+        break;                        //el LF que PRINT # manda detras del CR
+      if (data != 13)
+      {
+        if (_dev_out_idx < DEV_LINE_MAX - 1)
+          _dev_out[_dev_out_idx++] = data;
+        break;
+      }
+      _dev_out[_dev_out_idx] = 0;     //CR: la linea esta completa
+      _dev_out_idx = 0;
+      _dev_out_res = devOutLine();
       break;
     case CMD_SDFMOUNT:
       switch (_cmd_st)
@@ -698,6 +1202,27 @@ inline uint8_t dataToSend()
         return 0;
       }
       return _test_msg[_test_idx++];
+    case CMD_SDFDEBUG:
+      //un byte por lectura hasta el 0; al terminar el buffer queda vacio
+      if (_dbg_idx < _dbg_len)
+        return _dbg_msg[_dbg_idx++];
+      _dbg_idx = 0;
+      _dbg_len = 0;
+      _cmd = 0;
+      return 0;
+    case CMD_DEVNAME:
+      _cmd = 0;
+      return devFind();
+    case CMD_DEVOPEN:
+      _cmd = 0;
+      return _dev_open_res;
+    case CMD_DEVIN:
+      return devInByte();
+    case CMD_DEVOUT:
+      return _dev_out_res;            //DEV_BUSY hasta que loop() escriba el chip
+    case CMD_DEVEOF:
+      _cmd = 0;
+      return devEof();
     case CMD_SDFFILES:
       //un byte por lectura: los nombres como ASCIIZ y un nombre vacio al final
       if ( _list_idx == 0xff )
@@ -920,6 +1445,13 @@ void setup() {
   // que la SD anduviera y mientras tanto nadie atendia al MSX: CALL SDFTEST
   // leia el bus flotando y no habia forma de saber por que.
 
+  // El DS1307 vive en PC4/PC5, que el perfil DSK deja libres. Va antes de
+  // habilitar el PCINT: twiInit() hace lectura-modificacion-escritura sobre
+  // PORTC, que es el mismo puerto del que la ISR maneja el /WAIT.
+  twiInit();
+
+  dbg("sdf-1 arranco\r\n");  //ejemplo de dbg(): borralo cuando pongas los tuyos
+
   digitalWrite(MSX_EN_PIN, LOW); //deshabilito el decoder
 
   // Armo el pin-change de PC0 (PCINT8) a mano. El orden importa: primero
@@ -943,6 +1475,13 @@ void loop()
     if (!_sd_ok)
       delay(SD_RETRY_MS);
   }
+
+  // El reloj: releerlo aca y no en la ISR. La copia que deja rtcPoll() es la
+  // que lee OPEN "RTC:", y seria tambien la que conteste el RP-5C01 emulado
+  // si alguna vez se hace ese camino.
+  rtcPoll();
+  if (_rtc_write_req)
+    rtcWrite();
 
   // CALL SDFNEW: crear y llenar la imagen tarda segundos, asi que no puede ir
   // en la ISR, que tiene al MSX en /WAIT. Mientras tanto la ROM lee SDFNEW_BUSY.

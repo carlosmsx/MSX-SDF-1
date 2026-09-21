@@ -3,15 +3,26 @@
 ;que coincidir con defs.h del firmware.
 ;
 ;Comandos agrupados por funcion, un nibble alto por grupo:
-;  0DxH diagnostico, 0ExH SD e imagenes DSK, 0FxH driver de disco de MSX-DOS
+;  09xH dispositivos de BASIC, 0DxH diagnostico, 0ExH SD e imagenes DSK,
+;  0FxH driver de disco de MSX-DOS
 
 ;Version del protocolo con el firmware: tiene que coincidir con
 ;PROTOCOL_VERSION en defs.h. La compara CALL SDFTEST.
-PROTOCOL	EQU		3
+PROTOCOL	EQU		5
 
+;09xH: tubo de dispositivos de BASIC (OPEN "RTC:"...). La ROM no sabe que
+;dispositivos hay: pregunta el nombre y despues pasa bytes. Un dispositivo
+;nuevo es firmware, no ROM.
+CMD_DEVNAME	EQU		090H	;manda PROCNM ASCIIZ, contesta ID 0-3 o 0FFH
+CMD_DEVOPEN	EQU		091H	;manda ID, modo, largo y el texto tras los ":"
+CMD_DEVCLOSE	EQU	092H
+CMD_DEVIN	EQU		093H	;un byte por lectura, 0 = fin de datos
+CMD_DEVOUT	EQU		094H	;bytes; el CR ejecuta la linea y deja el resultado
+CMD_DEVEOF	EQU		095H	;0FFH fin o dato no confiable, 0 si hay datos
 ;0DxH: diagnostico
 CMD_DEBUG	EQU		0D0H
 CMD_SDFTEST	EQU		0D1H
+CMD_SDFDEBUG	EQU	0D2H	;el firmware manda texto: lo imprime CALL SDFDEBUG
 ;0ExH: SD e imagenes DSK
 CMD_SENDSTR	EQU		0E0H	;de antes de agrupar; hoy no lo usa nadie
 CMD_SDFMOUNT	EQU		0E1H
@@ -43,6 +54,14 @@ SDFNEW_BUSY	EQU		0FEH
 ;Drive interno con la imagen recien creada por CMD_SDFNEW: el DOS no lo ve,
 ;solo sirve para que la ROM le escriba los sectores de sistema.
 NEW_DRIVE	EQU		2
+
+;Mientras el firmware ejecuta una linea de CMD_DEVOUT contesta esto en vez del
+;resultado, igual que SDFNEW_BUSY.
+DEV_BUSY	EQU		0FEH
+
+;Error de BASIC que devuelve la ROM si el firmware contesta cualquier cosa con
+;el bit 7 puesto (bus flotando en 0FFH, firmware viejo).
+ERR_DEVICE_IO	EQU	19
 
 ;----I/O Ports----
 PORT_CMD	EQU		1

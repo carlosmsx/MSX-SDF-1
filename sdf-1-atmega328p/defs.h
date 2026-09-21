@@ -52,6 +52,7 @@
 //
 // Los codigos se agrupan por funcion, un nibble alto por grupo. Un grupo
 // nuevo toma un nibble libre; no se mezclan comandos de grupos distintos.
+//   0x9x  dispositivos de BASIC (OPEN "RTC:"...)
 //   0xDx  diagnostico
 //   0xEx  manejo de la SD y de las imagenes DSK (CALL SDF...)
 //   0xFx  driver de disco de MSX-DOS (las rutinas de DSKDRV.MAC)
@@ -61,6 +62,10 @@
 // Version del firmware, la muestra CALL SDFTEST. La fecha de compilacion
 // distingue dos grabaciones de la misma version.
 #define FW_VERSION        "0.2 " __DATE__
+
+// CALL SDFDEBUG imprime lo que el firmware haya dejado con dbg() y lo vacia.
+// Son 64 bytes de RAM: si hacen falta para otra cosa, bajarlo.
+#define DEBUG_MSG_MAX     64
 
 // CALL SDFTEST muestra la version y, en otra linea, el estado de la SD. La
 // ROM lee a lo sumo 32 caracteres: si no entran, el sketch no compila.
@@ -72,11 +77,24 @@
 //   1 = byte de estado en READ/WRITE, SDFFILES/SDFMOUNT/SDFUMOUNT, SDFTEST
 //   2 = imagenes de 360 KB: GETDPB elige el DPB por el primer byte de la FAT
 //   3 = CALL SDFNEW, y DSKFMT formatea segun el largo de la imagen
-#define PROTOCOL_VERSION  3
+//   4 = tubo de dispositivos de BASIC (0x9x) y RTC: sobre el DS1307
+//   5 = CALL SDFDEBUG y CALL RTC; fuera CALL FFILES
+#define PROTOCOL_VERSION  5
+
+// 0x9x: tubo de dispositivos de BASIC. La ROM no sabe que dispositivos hay:
+// pregunta por el nombre y despues pasa bytes. Uno nuevo se agrega ACA, no en
+// la ROM.
+#define CMD_DEVNAME   0x90  //nombre ASCIIZ -> ID 0-3, o DEV_NONE
+#define CMD_DEVOPEN   0x91  //ID, modo, largo y el texto que sigue a los ":"
+#define CMD_DEVCLOSE  0x92
+#define CMD_DEVIN     0x93  //un byte por lectura, 0 = fin de datos
+#define CMD_DEVOUT    0x94  //bytes; el CR ejecuta la linea
+#define CMD_DEVEOF    0x95
 
 // 0xDx: diagnostico
 #define CMD_DEBUG     0xD0
 #define CMD_SDFTEST   0xD1
+#define CMD_SDFDEBUG  0xD2  //texto libre del firmware: lo imprime CALL SDFDEBUG
 
 // 0xEx: SD e imagenes DSK
 #define CMD_SENDSTR   0xE0  //de antes de agrupar; hoy no lo usa nadie
@@ -123,6 +141,15 @@
 #define CMD_DSKCHG__STATUS        41
 #define CMD_DSKFMT__DRIVE         42
 #define CMD_DSKFMT__MEDIA         43
+#define CMD_DEVNAME__NAME         50
+#define CMD_DEVOPEN__ID           51
+#define CMD_DEVOPEN__MODE         52
+#define CMD_DEVOPEN__LENGTH       53
+#define CMD_DEVOPEN__NAME         54
+#define CMD_DEVOPEN__RESULT       55
+#define CMD_DEVCLOSE__ID          56
+#define CMD_DEVCLOSE__MODE        58
+#define CMD_DEVOUT__LINE          57
 
 // Respuesta de CMD_SDFMOUNT, CMD_SDFUMOUNT y CMD_SDFNEW: 0 si anduvo, si no el
 // numero de error de BASIC que muestra el MSX. Asi la ROM no necesita una tabla
@@ -135,6 +162,8 @@
 #define ERR_DISK_FULL             66
 #define ERR_DISK_IO               69
 #define ERR_DISK_OFFLINE          70  //no hay SD, todavia no inicializo, o esta ocupada
+#define ERR_ILLEGAL_FUNCTION       5  //la linea que mando PRINT # no se entiende
+#define ERR_DEVICE_IO             19  //el chip no contesta
 
 // Formatos que conoce GETDPB en la ROM, los dos de 3,5" y 80 pistas. La ROM
 // elige el DPB por el primer byte de la FAT; el firmware solo mira el largo.
@@ -151,6 +180,40 @@
 #define SDFNEW_BUSY               0xFE
 #define NEW_DRIVE                 2
 #define NEW_ZERO_CHUNK            64
+
+// ---- Dispositivos de BASIC ----
+//
+// Mientras el firmware ejecuta una linea de CMD_DEVOUT contesta DEV_BUSY en vez
+// del resultado, igual que SDFNEW_BUSY: escribir el DS1307 es I2C y el I2C no
+// se toca desde la ISR, con el MSX en /WAIT.
+#define DEV_BUSY          0xFE
+#define DEV_NONE          0xFF  //tambien es lo que lee la ROM con el bus flotando
+
+#define DEV_RTC           0     //OPEN "RTC:"
+
+#define DEV_LINE_MAX      32    //la linea mas larga que se arma o se acepta
+#define DEV_NAME_MAX      8     //nombre del dispositivo, y texto tras los ":"
+
+// Modos de OPEN de BASIC, tal como llegan en el parametro del CMD_DEVOPEN.
+#define DEV_MODE_INPUT    1
+#define DEV_MODE_OUTPUT   2
+#define DEV_MODE_RANDOM   4
+#define DEV_MODE_APPEND   8
+
+// ---- RTC DS1307 ----
+//
+// Direccion fija del chip. La comparte con el MPU-6050, que se corre a 0x69
+// con AD0 a VCC.
+#define DS1307_ADDR       0x68
+#define RTC_POLL_MS       250   //cada cuanto loop() relee el chip
+
+// Formatos de RTC:, elegidos con el texto que va despues de los dos puntos.
+#define RTC_FMT_FULL      0     //"RTC:"   2026-09-20 14:35:07
+#define RTC_FMT_DATE      1     //"RTC:D"  2026-09-20
+#define RTC_FMT_TIME      2     //"RTC:T"  14:35:07
+#define RTC_FMT_NUM       3     //"RTC:N"  2026,9,20,14,35,7,1  para INPUT #
+#define RTC_FMT_WDAY      4     //"RTC:W"  DOM
+#define RTC_FMT_BAD       0xFF
 
 // SD: pausa entre intentos de inicializarla, y valor de _sd_error antes del
 // primer intento. Los codigos de error de SdFat son chicos: 0xFF no choca.

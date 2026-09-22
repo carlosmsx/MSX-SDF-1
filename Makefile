@@ -91,7 +91,7 @@ DATA_ORG2 := F327h
 REL_KIT  := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES)))
 REL_KIT2 := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES2)))
 
-.PHONY: all rom rom-rtc firmware fuses flash clean check check-rom check-firmware icsp mapas
+.PHONY: all rom rom-rtc rom-verify firmware fuses flash clean check check-rom check-firmware icsp mapas
 
 all: rom firmware
 
@@ -99,6 +99,10 @@ rom: $(OUT)/sdf1.rom
 
 rom-rtc: $(OUT)/sdf1.rom
 	$(PYTHON) tools/patch_rtc.py $(OUT)/sdf1.rom
+	$(PYTHON) tools/fingerprint_rtc.py $(OUT)/sdf1.rom
+
+rom-verify: $(OUT)/sdf1.rom
+	$(PYTHON) tools/verify_rtc.py $(OUT)/sdf1.rom
 
 check: check-rom check-firmware
 

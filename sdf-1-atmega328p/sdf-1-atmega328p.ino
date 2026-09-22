@@ -460,6 +460,14 @@ uint32_t _rtc_next_ms = 0;
 RtcRegs _rtc_pending;                   //lo que pidio PRINT #, para loop()
 volatile bool _rtc_write_req = false;
 
+// RP-5C01 emulado con DS1307: shadow de los 4 bancos (52 bytes, nibbles BCD)
+// Banco 0 (reloj): 13 nibbles (seg, min, hora, wd, dia, mes, anio, 6 nibbles libres)
+// Banco 1 (alarma): 13 nibbles (estructura similar)
+// Bancos 2/3 (RAM CMOS): 26 nibbles de 4 bits cada uno
+volatile uint8_t _rtc_shadow[52];       //nibbles BCD del RP-5C01
+volatile uint8_t _rtc_bank_reg = 0;     //nibble: bits 1-0 = banco, bits 3-2 = registro
+volatile bool _rtc_bank_write = false;  //hay que escribir al DS1307 despues de un SETDA/SETTI
+
 // Estado del tubo. Entrada y salida son independientes: se puede tener un
 // archivo FOR INPUT y otro FOR OUTPUT sobre el mismo dispositivo.
 volatile uint8_t _dev_in_id = DEV_NONE, _dev_out_id = DEV_NONE;
@@ -613,6 +621,60 @@ void rtcWrite()
   _dev_out_res = ok ? 0 : ERR_DEVICE_IO;
 
   _rtc_next_ms = 0;  //que la copia se actualice ya, sin esperar el poll
+}
+
+// ---- RP-5C01 emulado con DS1307 -----------------------------------------
+// Shadow de los 4 bancos, actualizado en loop() desde la copia del DS1307.
+// Estructura del banco 0 (reloj, 13 nibbles BCD):
+//   [0-1]  segundos (00-59)
+//   [2-3]  minutos (00-59)
+//   [4-5]  horas (00-23)
+//   [6]    dia de semana (1-7)
+//   [7-8]  dia (01-31)
+//   [9-10] mes (01-12)
+//   [11-12] anio (00-99)
+// El kernel solo usa el banco 0, pero se implementa completo por consistencia.
+
+void rtcUpdateShadow()
+{
+  // Leer la copia actual del DS1307 (la que refresca loop() cada 250ms)
+  noInterrupts();
+  RtcRegs r = _rtc_buf[_rtc_cur];
+  interrupts();
+
+  // Banco 0: reloj
+  // Los registros del DS1307 ya vienen en BCD, asi que copiar nibble a nibble
+  _rtc_shadow[0] = (r.s >> 4) & 0x07;      //decenas de seg (0-5)
+  _rtc_shadow[1] = r.s & 0x0F;             //unidades de seg
+  _rtc_shadow[2] = (r.mi >> 4) & 0x07;     //decenas de min
+  _rtc_shadow[3] = r.mi & 0x0F;            //unidades de min
+  _rtc_shadow[4] = (r.h >> 4) & 0x02;      //decenas de hora (0-2)
+  _rtc_shadow[5] = r.h & 0x0F;             //unidades de hora
+  _rtc_shadow[6] = r.wd & 0x07;            //dia de semana (1-7)
+  _rtc_shadow[7] = (r.d >> 4) & 0x03;      //decenas de dia (0-3)
+  _rtc_shadow[8] = r.d & 0x0F;             //unidades de dia
+  _rtc_shadow[9] = (r.mo >> 4) & 0x01;     //decenas de mes (0-1)
+  _rtc_shadow[10] = r.mo & 0x0F;           //unidades de mes
+  _rtc_shadow[11] = (r.y >> 4) & 0x0F;     //decenas de anio
+  _rtc_shadow[12] = r.y & 0x0F;            //unidades de anio
+
+  // Banco 1: alarma (no implementado, zerado)
+  for (int i = 13; i < 26; i++)
+    _rtc_shadow[i] = 0;
+
+  // Bancos 2/3: RAM CMOS (persiste en EEPROM, por ahora zerada)
+  for (int i = 26; i < 52; i++)
+    _rtc_shadow[i] = 0;
+}
+
+inline uint8_t rtcNibble()
+{
+  // Devolver el nibble seleccionado con el mapeo cruzado de puerto
+  uint8_t bank = _rtc_bank_reg & 0x03;
+  uint8_t reg = (_rtc_bank_reg >> 2) & 0x0F;
+  uint8_t offset = bank * 13 + reg;
+  if (offset >= 52) return 0;
+  return 0xF0 | _rtc_shadow[offset];  //devolver 0F0h | nibble como el chip real
 }
 
 // ---- Armar la linea, desde la ISR -------------------------------------
@@ -829,11 +891,18 @@ inline void processCommand(register uint8_t command)
     _debug = true;
     return;
   }
-  
+
   _cmd = command;
 
   //resincronizo datos a recibir
-  //_idx = 0;  
+  //_idx = 0;
+
+  // Comandos 0x0X: RP-5C01 emulado (seleccionar registro)
+  if ((command & 0xF0) == 0x00)
+  {
+    _rtc_bank_reg = command & 0x0F;  //latches el registro de 0-Fh
+    return;
+  }
 
   switch (_cmd)
   {
@@ -933,6 +1002,23 @@ inline void processData(register uint8_t data)
   
   switch (_cmd)
   {
+    default:
+      // Comandos 0x0X: RP-5C01 emulado (escribir nibble)
+      if ((_cmd & 0xF0) == 0x00)
+      {
+        uint8_t bank = _rtc_bank_reg & 0x03;
+        uint8_t reg = (_rtc_bank_reg >> 2) & 0x0F;
+        uint8_t offset = bank * 13 + reg;
+        if (offset < 52)
+        {
+          _rtc_shadow[offset] = data & 0x0F;
+          // Si se escribe en banco 0 (reloj), marcar para actualizar el DS1307
+          if (bank == 0)
+            _rtc_bank_write = true;
+        }
+      }
+      break;
+
     case CMD_SENDSTR:
       //Serial.print(char(data));
       break;
@@ -1189,6 +1275,12 @@ inline uint8_t dataToSend()
 {
   switch(_cmd)
   {
+    // Comandos 0x0X: RP-5C01 emulado (leer nibble)
+    default:
+      if ((_cmd & 0xF0) == 0x00)
+        return rtcNibble();
+      break;
+
     case CMD_SDFTEST:
       //primero la version del protocolo, despues _test_msg como ASCIIZ
       if ( _test_idx == 0xff )
@@ -1477,9 +1569,9 @@ void loop()
   }
 
   // El reloj: releerlo aca y no en la ISR. La copia que deja rtcPoll() es la
-  // que lee OPEN "RTC:", y seria tambien la que conteste el RP-5C01 emulado
-  // si alguna vez se hace ese camino.
+  // que lee OPEN "RTC:", y la que convierte rtcUpdateShadow() al shadow del RP-5C01.
   rtcPoll();
+  rtcUpdateShadow();  //convertir DS1307 al formato RP-5C01 (nibbles BCD)
   if (_rtc_write_req)
     rtcWrite();
 

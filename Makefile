@@ -91,18 +91,17 @@ DATA_ORG2 := F327h
 REL_KIT  := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES)))
 REL_KIT2 := $(addprefix $(KIT)/,$(addsuffix .REL,$(MODULES2)))
 
-.PHONY: all rom rom-rtc rom-verify firmware fuses flash clean check check-rom check-firmware icsp mapas
+.PHONY: all rom rom-rtc firmware fuses flash clean check check-rom check-firmware icsp mapas
 
 all: rom firmware
 
 rom: $(OUT)/sdf1.rom
 
+# Parchea CHKCLK/$GETTI/$SETDA/$SETTI (camino A de reloj-cuatro-caminos.md)
+# para que hablen con el DS1307 por el protocolo normal en vez del RP-5C01.
+# Necesita el .sym del mismo link: por eso depende de sdf1.rom y no al reves.
 rom-rtc: $(OUT)/sdf1.rom
-	$(PYTHON) tools/patch_rtc.py $(OUT)/sdf1.rom
-	$(PYTHON) tools/fingerprint_rtc.py $(OUT)/sdf1.rom
-
-rom-verify: $(OUT)/sdf1.rom
-	$(PYTHON) tools/verify_rtc.py $(OUT)/sdf1.rom
+	$(PYTHON) tools/patch_rtc_kernel.py $(OUT)/sdf1.rom $(OUT)/msxdos.sym
 
 check: check-rom check-firmware
 

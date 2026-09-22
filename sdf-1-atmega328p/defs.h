@@ -53,6 +53,9 @@
 // Los codigos se agrupan por funcion, un nibble alto por grupo. Un grupo
 // nuevo toma un nibble libre; no se mezclan comandos de grupos distintos.
 //   0x9x  dispositivos de BASIC (OPEN "RTC:"...)
+//   0xAx  reloj del kernel (CHKCLK/$GETTI/$SETDA/$SETTI parcheados, camino A
+//         de reloj-cuatro-caminos.md: nada de puertos crudos, protocolo
+//         normal de comando+datos como el resto del sistema)
 //   0xDx  diagnostico
 //   0xEx  manejo de la SD y de las imagenes DSK (CALL SDF...)
 //   0xFx  driver de disco de MSX-DOS (las rutinas de DSKDRV.MAC)
@@ -79,7 +82,8 @@
 //   3 = CALL SDFNEW, y DSKFMT formatea segun el largo de la imagen
 //   4 = tubo de dispositivos de BASIC (0x9x) y RTC: sobre el DS1307
 //   5 = CALL SDFDEBUG y CALL RTC; fuera CALL FFILES
-#define PROTOCOL_VERSION  5
+//   6 = CHKCLK/$GETTI/$SETDA/$SETTI parcheados sobre el DS1307 (0xAx)
+#define PROTOCOL_VERSION  6
 
 // 0x9x: tubo de dispositivos de BASIC. La ROM no sabe que dispositivos hay:
 // pregunta por el nombre y despues pasa bytes. Uno nuevo se agrega ACA, no en
@@ -90,6 +94,15 @@
 #define CMD_DEVIN     0x93  //un byte por lectura, 0 = fin de datos
 #define CMD_DEVOUT    0x94  //bytes; el CR ejecuta la linea
 #define CMD_DEVEOF    0x95
+
+// 0xAx: reloj del kernel. Las 4 entradas parchadas (CHKCLK/$GETTI/$SETDA/
+// $SETTI) hablan con el firmware por el protocolo normal (WriteCommand/
+// WriteByte/ReadByte de DSKDRV.MAC), nada de puertos crudos como el camino B
+// que se probo primero y fallo por timing (ver reloj-cuatro-caminos.md).
+#define CMD_RTCCHK    0xA0  //CHKCLK: sin datos, contesta 1 byte (0FFh=hay reloj, 0=no)
+#define CMD_RTCGET    0xA1  //$GETTI: contesta 7 bytes binarios: anio-1980,mes,dia,hora,min,seg,diasem
+#define CMD_RTCSETDA  0xA2  //$SETDA: recibe 3 bytes: anio-1980,mes,dia
+#define CMD_RTCSETTI  0xA3  //$SETTI: recibe 3 bytes: hora,min,seg
 
 // 0xDx: diagnostico
 #define CMD_DEBUG     0xD0

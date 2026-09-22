@@ -460,19 +460,20 @@ uint32_t _rtc_next_ms = 0;
 RtcRegs _rtc_pending;                   //lo que pidio PRINT #, para loop()
 volatile bool _rtc_write_req = false;
 
-// RP-5C01 emulado con DS1307: shadow de los 4 bancos (52 bytes, nibbles BCD)
-// Banco 0 (reloj): 13 nibbles (seg, min, hora, wd, dia, mes, anio, 6 nibbles libres)
-// Banco 1 (alarma): 13 nibbles (estructura similar)
-// Bancos 2/3 (RAM CMOS): 26 nibbles de 4 bits cada uno
-//
-// OJO: el banco NO sale de los bits del indice (0-Fh) que llega por el puerto
-// de comando. El indice solo dice CUAL registro dentro del banco actual (o si
-// es 0Dh/0Eh/0Fh, que son especiales y no pertenecen a ningun banco). El banco
-// activo lo fija el VALOR que se escribe en el registro de modo (0Dh), en sus
-// bits 0-1 - exactamente como lo describe reloj-capa-rp5c01-en-el-kit.md.
-volatile uint8_t _rtc_shadow[52];       //nibbles BCD de los bancos 0-3
-volatile uint8_t _rtc_reg_idx = 0;      //indice de registro seleccionado (0-Fh)
-volatile uint8_t _rtc_mode = 0;         //valor del registro 0Dh: bits0-1 banco, bit2 alarma, bit3 timer
+// Reloj del kernel (CHKCLK/$GETTI/$SETDA/$SETTI parcheados en la ROM con JP
+// a rutinas propias, camino A de reloj-cuatro-caminos.md). El camino B
+// (emular el RP-5C01 completo en los puertos 0/1) se probo primero y fallaba
+// por timing: el bucle de deteccion de CHKCLK hace un OUT seguido de un IN
+// con solo 8 T-states de separacion (~2,2us a 3,58MHz), muy por debajo de
+// los 6us que tarda el firmware en rehabilitar el decoder entre accesos
+// (MSX_REENABLE_DELAY_US). El camino A no tiene ese problema: la ROM habla
+// con el firmware por el protocolo normal de comando+datos (el mismo que ya
+// usan CMD_SDFMOUNT, CMD_DEVIN, etc.), con el margen de los EX (SP),HL de
+// WriteByte/WriteCommand/ReadByte.
+volatile uint8_t _rtcget_buf[7];   //anio-1980,mes,dia,hora,min,seg,diasem: CMD_RTCGET
+volatile uint8_t _rtcget_idx = 0;
+volatile uint8_t _rtcset_buf[3];   //CMD_RTCSETDA (anio,mes,dia) o CMD_RTCSETTI (h,m,s)
+volatile uint8_t _rtcset_idx = 0;
 
 // Estado del tubo. Entrada y salida son independientes: se puede tener un
 // archivo FOR INPUT y otro FOR OUTPUT sobre el mismo dispositivo.
@@ -629,63 +630,66 @@ void rtcWrite()
   _rtc_next_ms = 0;  //que la copia se actualice ya, sin esperar el poll
 }
 
-// ---- RP-5C01 emulado con DS1307 -----------------------------------------
-// Shadow de los 4 bancos, actualizado en loop() desde la copia del DS1307.
-// Estructura del banco 0 (reloj, 13 nibbles BCD):
-//   [0-1]  segundos (00-59)
-//   [2-3]  minutos (00-59)
-//   [4-5]  horas (00-23)
-//   [6]    dia de semana (1-7)
-//   [7-8]  dia (01-31)
-//   [9-10] mes (01-12)
-//   [11-12] anio (00-99)
-// El kernel solo usa el banco 0, pero se implementa completo por consistencia.
+// ---- Reloj del kernel (CHKCLK/$GETTI/$SETDA/$SETTI parcheados) ---------
+//
+// CMD_RTCCHK/GET/SETDA/SETTI: protocolo normal, nada de puertos crudos. Los
+// valores viajan siempre en binario (no BCD), porque asi los espera el
+// kernel (SETYEA, y SETTIM compara contra 18h/3Bh en decimal - ver el
+// desensamblado en la nota del proyecto). bcd2bin/bin2bcd ya existen mas
+// arriba para el dispositivo BASIC RTC:.
 
-void rtcUpdateShadow()
+// CMD_RTCGET: arma los 7 bytes de respuesta desde la copia actual del
+// DS1307. El DS1307 guarda el anio como 2 digitos asumiendo 20xx (ver
+// rtcWeekday); el kernel lo quiere contado desde 1980, de ahi el +20.
+//
+// OJO: esta funcion (y rtcApplyDate/rtcApplyTime) se llaman desde
+// processCommand()/processData(), que a su vez corren DENTRO de
+// ISR(PCINT1_vect) - a diferencia de rtcWrite(), que solo se llama desde
+// loop(). Por eso NO llevan noInterrupts()/interrupts(): las interrupciones
+// ya estan deshabilitadas por estar dentro de una ISR, y un interrupts()
+// aca adentro las reactivaria antes de que la ISR del MSX termine, dejando
+// que se anide otra interrupcion sobre esta. Leer _rtc_cur/_rtc_buf sin el
+// guard es seguro: la ISR nunca corre en paralelo con loop() (es la misma
+// CPU), solo puede interrumpirla, y _rtc_cur cambia de a un byte (atomico).
+void rtcBuildGetBuf()
 {
-  // Si hay una escritura al DS1307 pendiente (CHKCLK o SETDA/SETTI recien
-  // dejaron el banco 0 listo, ver processData), no pisarlo con lo que todavia
-  // esta en el DS1307: se pisaria el valor que se acaba de poner con el viejo.
-  if (_rtc_write_req)
-    return;
-
-  // Leer la copia actual del DS1307 (la que refresca loop() cada 250ms)
-  noInterrupts();
   RtcRegs r = _rtc_buf[_rtc_cur];
-  interrupts();
 
-  // Banco 0: reloj. Los registros del DS1307 ya vienen en BCD, asi que copiar
-  // nibble a nibble. Los bancos 1/2/3 NO se tocan aca: son RAM que solo cambia
-  // por escritura desde el puerto (ver processData), y arrancan en 0 porque
-  // son variables globales sin inicializador (.bss, cero garantizado).
-  _rtc_shadow[0] = (r.s >> 4) & 0x07;      //decenas de seg (0-5)
-  _rtc_shadow[1] = r.s & 0x0F;             //unidades de seg
-  _rtc_shadow[2] = (r.mi >> 4) & 0x07;     //decenas de min
-  _rtc_shadow[3] = r.mi & 0x0F;            //unidades de min
-  _rtc_shadow[4] = (r.h >> 4) & 0x02;      //decenas de hora (0-2)
-  _rtc_shadow[5] = r.h & 0x0F;             //unidades de hora
-  _rtc_shadow[6] = r.wd & 0x07;            //dia de semana (1-7)
-  _rtc_shadow[7] = (r.d >> 4) & 0x03;      //decenas de dia (0-3)
-  _rtc_shadow[8] = r.d & 0x0F;             //unidades de dia
-  _rtc_shadow[9] = (r.mo >> 4) & 0x01;     //decenas de mes (0-1)
-  _rtc_shadow[10] = r.mo & 0x0F;           //unidades de mes
-  _rtc_shadow[11] = (r.y >> 4) & 0x0F;     //decenas de anio
-  _rtc_shadow[12] = r.y & 0x0F;            //unidades de anio
+  _rtcget_buf[0] = bcd2bin(r.y) + 20;  //anio-1980 (DS1307: 20xx)
+  _rtcget_buf[1] = bcd2bin(r.mo);
+  _rtcget_buf[2] = bcd2bin(r.d);
+  _rtcget_buf[3] = bcd2bin(r.h);
+  _rtcget_buf[4] = bcd2bin(r.mi);
+  _rtcget_buf[5] = bcd2bin(r.s);
+  _rtcget_buf[6] = r.wd;
 }
 
-inline uint8_t rtcNibble()
+// CMD_RTCSETDA/CMD_RTCSETTI: arman _rtc_pending a partir de la copia actual
+// (para no pisar la mitad que no cambio) y de los 3 bytes que acaban de
+// llegar, y disparan la escritura igual que PRINT #1 sobre "RTC:" (ver
+// rtcWrite(), llamada desde loop()). Mismo comentario que rtcBuildGetBuf()
+// sobre por que no llevan noInterrupts()/interrupts().
+void rtcApplyDate()  //CMD_RTCSETDA: _rtcset_buf = anio-1980,mes,dia
 {
-  // 0Dh (modo), 0Eh (test) y 0Fh (reset) no pertenecen a ningun banco.
-  if (_rtc_reg_idx == 0x0D)
-    return 0xF0 | _rtc_mode;
-  if (_rtc_reg_idx == 0x0E || _rtc_reg_idx == 0x0F)
-    return 0xF0;  //son de solo escritura en el chip real; leerlos da 0
+  if (_rtc_write_req) return;  //ya hay una escritura en camino, no pisarla
+  RtcRegs r = _rtc_buf[_rtc_cur];
+  uint8_t y2 = (_rtcset_buf[0] >= 20) ? (_rtcset_buf[0] - 20) : 0;  //-> 20xx
+  r.y  = bin2bcd(y2);
+  r.mo = bin2bcd(_rtcset_buf[1]);
+  r.d  = bin2bcd(_rtcset_buf[2]);
+  _rtc_pending = r;
+  _rtc_write_req = true;
+}
 
-  // 0-Ch: el banco lo decide el modo actual, no el indice.
-  uint8_t bank = _rtc_mode & 0x03;
-  uint8_t offset = bank * 13 + _rtc_reg_idx;
-  if (offset >= 52) return 0xF0;
-  return 0xF0 | _rtc_shadow[offset];  //devolver 0F0h | nibble como el chip real
+void rtcApplyTime()  //CMD_RTCSETTI: _rtcset_buf = hora,minuto,segundo
+{
+  if (_rtc_write_req) return;
+  RtcRegs r = _rtc_buf[_rtc_cur];
+  r.h  = bin2bcd(_rtcset_buf[0]);
+  r.mi = bin2bcd(_rtcset_buf[1]);
+  r.s  = bin2bcd(_rtcset_buf[2]);
+  _rtc_pending = r;
+  _rtc_write_req = true;
 }
 
 // ---- Armar la linea, desde la ISR -------------------------------------
@@ -908,15 +912,17 @@ inline void processCommand(register uint8_t command)
   //resincronizo datos a recibir
   //_idx = 0;
 
-  // Comandos 0x0X: RP-5C01 emulado (seleccionar indice de registro, 0-Fh)
-  if ((command & 0xF0) == 0x00)
-  {
-    _rtc_reg_idx = command & 0x0F;
-    return;
-  }
-
   switch (_cmd)
   {
+    // 0xAx: reloj del kernel (CHKCLK/$GETTI/$SETDA/$SETTI parcheados)
+    case CMD_RTCGET:
+      rtcBuildGetBuf();
+      _rtcget_idx = 0;
+      break;
+    case CMD_RTCSETDA:
+    case CMD_RTCSETTI:
+      _rtcset_idx = 0;
+      break;
     case CMD_SDFDEBUG:
       _dbg_idx = 0;
       break;
@@ -1013,44 +1019,20 @@ inline void processData(register uint8_t data)
   
   switch (_cmd)
   {
-    default:
-      // Comandos 0x0X: RP-5C01 emulado (escribir en el registro seleccionado)
-      if ((_cmd & 0xF0) == 0x00)
-      {
-        if (_rtc_reg_idx == 0x0D)
-        {
-          // Registro de modo: bits0-1 banco, bit2 alarma, bit3 timer.
-          uint8_t nuevo = data & 0x0F;
-          uint8_t timer_subio = (nuevo & 0x08) && !(_rtc_mode & 0x08);
-          _rtc_mode = nuevo;
-
-          // El flanco 0->1 del timer con banco 0 activo es el punto de
-          // sincronizacion natural (ver reloj-capa-rp5c01-en-el-kit.md): es
-          // cuando CHKCLK/SETDA/SETTI ya reescribieron los 13 nibbles del
-          // reloj y arrancan el timer. Ahi se manda el banco 0 al DS1307.
-          if (timer_subio && (nuevo & 0x03) == 0 && !_rtc_write_req)
-          {
-            _rtc_pending.s  = (_rtc_shadow[0]  << 4) | _rtc_shadow[1];
-            _rtc_pending.mi = (_rtc_shadow[2]  << 4) | _rtc_shadow[3];
-            _rtc_pending.h  = (_rtc_shadow[4]  << 4) | _rtc_shadow[5];
-            _rtc_pending.wd =  _rtc_shadow[6];
-            _rtc_pending.d  = (_rtc_shadow[7]  << 4) | _rtc_shadow[8];
-            _rtc_pending.mo = (_rtc_shadow[9]  << 4) | _rtc_shadow[10];
-            _rtc_pending.y  = (_rtc_shadow[11] << 4) | _rtc_shadow[12];
-            _rtc_write_req = true;
-          }
-        }
-        else if (_rtc_reg_idx <= 0x0C)
-        {
-          // 0-Ch: el banco activo lo dice el modo, no el indice.
-          uint8_t bank = _rtc_mode & 0x03;
-          uint8_t offset = bank * 13 + _rtc_reg_idx;
-          if (offset < 52)
-            _rtc_shadow[offset] = data & 0x0F;
-        }
-        //0Eh (test) y 0Fh (reset): el kernel los usa de paso, sin que la
-        //emulacion necesite hacer nada con ellos.
-      }
+    // 0xAx: reloj del kernel. CMD_RTCSETDA=anio-1980,mes,dia (3 bytes);
+    // CMD_RTCSETTI=hora,minuto,segundo (3 bytes). Al completarse los 3,
+    // arman _rtc_pending y disparan la escritura (ver rtcApplyDate/Time).
+    case CMD_RTCSETDA:
+      if (_rtcset_idx < 3)
+        _rtcset_buf[_rtcset_idx++] = data;
+      if (_rtcset_idx == 3)
+        rtcApplyDate();
+      break;
+    case CMD_RTCSETTI:
+      if (_rtcset_idx < 3)
+        _rtcset_buf[_rtcset_idx++] = data;
+      if (_rtcset_idx == 3)
+        rtcApplyTime();
       break;
 
     case CMD_SENDSTR:
@@ -1309,11 +1291,16 @@ inline uint8_t dataToSend()
 {
   switch(_cmd)
   {
-    // Comandos 0x0X: RP-5C01 emulado (leer nibble)
-    default:
-      if ((_cmd & 0xF0) == 0x00)
-        return rtcNibble();
-      break;
+    // 0xAx: reloj del kernel. CMD_RTCCHK: 1 byte (0FFh=hay reloj, 0=no).
+    // CMD_RTCGET: 7 bytes armados por rtcBuildGetBuf() en processCommand().
+    case CMD_RTCCHK:
+      _cmd = 0;
+      return _rtc_ok ? 0xFF : 0x00;
+    case CMD_RTCGET:
+      if (_rtcget_idx < 7)
+        return _rtcget_buf[_rtcget_idx++];
+      _cmd = 0;
+      return 0;
 
     case CMD_SDFTEST:
       //primero la version del protocolo, despues _test_msg como ASCIIZ
@@ -1602,10 +1589,10 @@ void loop()
       delay(SD_RETRY_MS);
   }
 
-  // El reloj: releerlo aca y no en la ISR. La copia que deja rtcPoll() es la
-  // que lee OPEN "RTC:", y la que convierte rtcUpdateShadow() al shadow del RP-5C01.
+  // El reloj: releerlo aca y no en la ISR. La misma copia la lee OPEN "RTC:"
+  // y CMD_RTCGET (rtcBuildGetBuf(), llamada desde processCommand() en la ISR
+  // - solo lectura de la copia, no I2C).
   rtcPoll();
-  rtcUpdateShadow();  //convertir DS1307 al formato RP-5C01 (nibbles BCD)
   if (_rtc_write_req)
     rtcWrite();
 

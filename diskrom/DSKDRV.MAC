@@ -56,6 +56,17 @@ EXTRN		GETSLOT,ENASLT,RAMAD2
 ; ENAINT	inform interrupts are being enabled
 ;EXTRN		PROCNM			;CALL statement name
 
+; Variables y rutina de fecha/hora del kernel, para el parche del reloj
+; (MYCHKCLK/MYGETTI/MYSETDA/MYSETTI, camino A de reloj-cuatro-caminos.md).
+; Las direcciones las resuelve el linker: nunca se hardcodean (mismo criterio
+; que OEMDEV, ver entrada-device-verificada).
+; TIMFLG	0 = no hay reloj; lo pone MYCHKCLK
+; CURDAT	contador de dias del kernel, lo actualiza MYSETDA
+; DAY/MONTH	fecha en RAM (dia y mes del mes en curso), en binario
+; YEAR		anio en RAM, en binario, contado desde 1980
+; SETYEA	setea YEAR y ajusta MONTAB para febrero (28/29 dias)
+EXTRN		TIMFLG,CURDAT,DAY,MONTH,YEAR,SETYEA
+
 ; symbols which must be defined by the driver
 
 ; INIHRD	initialize diskdriver hardware
@@ -146,6 +157,101 @@ ReadBlock:
 	EX		(SP),HL
 	EX		(SP),HL
 	DJNZ	ReadBlock
+	RET
+
+;----Reloj: MYCHKCLK/MYGETTI/MYSETDA/MYSETTI----
+;
+; Reemplazan a CHKCLK/$GETTI/$SETDA/$SETTI del kernel (parcheadas con JP por
+; tools/patch_rtc_kernel.py despues del link). Camino A de
+; reloj-cuatro-caminos.md: en vez de emular el RP-5C01 en B4h/B5h (que fallaba
+; por timing en el bucle de deteccion, el acceso mas apretado de toda la ROM),
+; hablan con el firmware por el protocolo normal de comando+datos, con el
+; mismo margen (los EX (SP),HL de WriteByte/WriteCommand/ReadByte) que ya usa
+; el resto del sistema en hardware. Los contratos de entrada/salida son los
+; que documenta reloj-capa-rp5c01-en-el-kit.md, verificados por desensamblado
+; de las rutinas originales.
+
+	PUBLIC	MYCHKCLK,MYGETTI,MYSETDA,MYSETTI
+
+; MYCHKCLK: sondea el reloj. Sale con TIMFLG en 0FFh si contesta, 0 si no.
+; Sin parametros de entrada ni de salida (igual que CHKCLK original).
+MYCHKCLK:
+	LD		A,CMD_RTCCHK
+	CALL	WriteCommand
+	CALL	ReadByte
+	LD		(TIMFLG),A
+	RET
+
+; MYGETTI: lee el reloj.
+; Sale: B=hora(0-23), C=minuto, D=segundo, todo binario; DAY/MONTH puestos,
+; YEAR seteado via SETYEA. Carry=1 si hay reloj.
+; Sin reloj: B=C=D=E=0, HL=(CURDAT), carry=0. (E no se usa mas adelante en el
+; kernel, pero se preserva el contrato exacto del original.)
+MYGETTI:
+	LD		A,(TIMFLG)
+	LD		B,A
+	LD		C,A
+	LD		D,A
+	LD		E,A
+	LD		HL,(CURDAT)
+	OR		A
+	RET		Z				;TIMFLG=0: sin reloj, carry ya en 0 por el OR A
+
+	LD		A,CMD_RTCGET
+	CALL	WriteCommand
+	CALL	ReadByte		;anio-1980
+	CALL	SETYEA
+	CALL	ReadByte		;mes
+	LD		(MONTH),A
+	CALL	ReadByte		;dia
+	LD		(DAY),A
+	CALL	ReadByte		;hora
+	LD		B,A
+	CALL	ReadByte		;minuto
+	LD		C,A
+	CALL	ReadByte		;segundo
+	LD		D,A
+	CALL	ReadByte		;dia de semana: el kernel no lo usa, se lee para
+						;vaciar el protocolo (7 bytes por CMD_RTCGET)
+	SCF
+	RET
+
+; MYSETDA: escribe fecha (BDOS 2Bh, SETDAT).
+; Entra con HL = nuevo contador de dias (CURDAT). Usa YEAR/MONTH/DAY de RAM,
+; que el kernel ya actualizo antes de llamar a $SETDA.
+MYSETDA:
+	LD		(CURDAT),HL
+	LD		A,(TIMFLG)
+	AND		A
+	RET		Z
+
+	LD		A,CMD_RTCSETDA
+	CALL	WriteCommand
+	LD		A,(YEAR)
+	CALL	WriteByte
+	LD		A,(MONTH)
+	CALL	WriteByte
+	LD		A,(DAY)
+	CALL	WriteByte
+	RET
+
+; MYSETTI: escribe hora (BDOS 2Dh, SETTIM).
+; Entra con B=hora, C=minuto, D=segundo, todo binario (asi los arma SETTIM
+; antes de llamar a $SETTI: los compara contra 18h/3Bh/3Bh, limites en
+; decimal, asi que no pueden ser BCD).
+MYSETTI:
+	LD		A,(TIMFLG)
+	AND		A
+	RET		Z
+
+	LD		A,CMD_RTCSETTI
+	CALL	WriteCommand
+	LD		A,B
+	CALL	WriteByte		;hora
+	LD		A,C
+	CALL	WriteByte		;minuto
+	LD		A,D
+	CALL	WriteByte		;segundo
 	RET
 
 ; INIHRD

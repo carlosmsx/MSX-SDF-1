@@ -3,12 +3,12 @@
 ;que coincidir con defs.h del firmware.
 ;
 ;Comandos agrupados por funcion, un nibble alto por grupo:
-;  09xH dispositivos de BASIC, 0DxH diagnostico, 0ExH SD e imagenes DSK,
-;  0FxH driver de disco de MSX-DOS
+;  09xH dispositivos de BASIC, 0AxH reloj del kernel, 0DxH diagnostico,
+;  0ExH SD e imagenes DSK, 0FxH driver de disco de MSX-DOS
 
 ;Version del protocolo con el firmware: tiene que coincidir con
 ;PROTOCOL_VERSION en defs.h. La compara CALL SDFTEST.
-PROTOCOL	EQU		5
+PROTOCOL	EQU		6
 
 ;09xH: tubo de dispositivos de BASIC (OPEN "RTC:"...). La ROM no sabe que
 ;dispositivos hay: pregunta el nombre y despues pasa bytes. Un dispositivo
@@ -19,6 +19,15 @@ CMD_DEVCLOSE	EQU	092H
 CMD_DEVIN	EQU		093H	;un byte por lectura, 0 = fin de datos
 CMD_DEVOUT	EQU		094H	;bytes; el CR ejecuta la linea y deja el resultado
 CMD_DEVEOF	EQU		095H	;0FFH fin o dato no confiable, 0 si hay datos
+;0AxH: reloj del kernel. CHKCLK/$GETTI/$SETDA/$SETTI parchados con JP a
+;MYCHKCLK/MYGETTI/MYSETDA/MYSETTI (DSKDRV.MAC), que hablan con el firmware
+;por el protocolo normal en vez de puertos crudos (camino A, ver
+;reloj-cuatro-caminos.md: el camino B fallaba por timing en el bucle de
+;deteccion del RP-5C01, el mas apretado de toda la ROM).
+CMD_RTCCHK	EQU		0A0H	;sin datos, contesta 1 byte (0FFH=hay reloj, 0=no)
+CMD_RTCGET	EQU		0A1H	;contesta 7 bytes: anio-1980,mes,dia,hora,min,seg,diasem
+CMD_RTCSETDA	EQU	0A2H	;recibe 3 bytes: anio-1980,mes,dia
+CMD_RTCSETTI	EQU	0A3H	;recibe 3 bytes: hora,min,seg
 ;0DxH: diagnostico
 CMD_DEBUG	EQU		0D0H
 CMD_SDFTEST	EQU		0D1H

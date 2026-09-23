@@ -9,10 +9,16 @@ tienda de electrónica, económicamente accesibles y **THT** (*thru hole*), de
 manera de facilitar el ensamblaje al hobbista. Igual siempre se puede hacer un
 PCB en SMT si alguien lo prefiere.
 
-Su **primer proyecto de ejemplo** —y lo único terminado hasta hoy— es un **lector
-de memorias SD**: el cartucho le presenta al MSX una unidad de disco estándar,
-arranca MSX-DOS y Disk BASIC desde imágenes `.DSK` guardadas en la tarjeta, y
-para el MSX es una disketera común.
+Su **primer proyecto de ejemplo** es un **lector de memorias SD**: el cartucho le
+presenta al MSX una unidad de disco estándar, arranca MSX-DOS y Disk BASIC desde
+imágenes `.DSK` guardadas en la tarjeta, y para el MSX es una disketera común
+([página del lector](https://dpc200.com.ar/sdf1-sd)).
+
+El **segundo** se le suma: un **reloj con pila**, un DS1307 colgado del I2C de H1.
+MSX-DOS arranca sabiendo la fecha y la hora, `CALL RTC` la muestra y la pone, y
+`OPEN "RTC:"` la lee desde un programa
+([página del reloj](https://dpc200.com.ar/sdf1-rtc)). Son los dos únicos proyectos
+terminados hasta hoy.
 
 > **Estado: en desarrollo.** La rev1 está fabricada y **requiere correcciones a
 > mano** antes de funcionar — ver [hardware/rev1/CORRECCIONES.md](hardware/rev1/CORRECCIONES.md).
@@ -159,8 +165,8 @@ estaría un UART o un ESP32. El "drive" ya es, entonces, un perfil montado sobre
 una placa genérica — y un armado **sin SD**, poblando sólo lo que tu proyecto
 necesita, es un uso perfectamente legítimo y no una versión mutilada.
 
-> **Ojo con lo que todavía no existe.** Lo único probado hoy es el lector de SD.
-> La placa *permite* otros usos —puerto serie con un UART I2C/SPI, sensores,
+> **Ojo con lo que todavía no existe.** Lo probado hoy es el lector de SD y el
+> reloj DS1307 que se le suma. La placa *permite* otros usos —puerto serie con un UART I2C/SPI, sensores,
 > puente a un micro con WiFi por SPI— pero **todavía no los trae**: no hay
 > firmware ni ROM publicados para ellos, ni está separado el "core" del protocolo
 > de la parte específica del disco. Si querés hacer el tuyo, hoy el punto de

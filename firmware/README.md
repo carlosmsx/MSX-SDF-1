@@ -5,6 +5,12 @@ quien quiera armar la placa sin instalar la toolchain de Arduino.
 
 Es codigo 100% propio: sale de `../sdf-1-atmega328p/` y de nada mas.
 
+Version **0.2** (protocolo 6): suma el reloj DS1307 por I2C (`OPEN "RTC:"`,
+`CALL RTC`), `CALL SDFNEW`, imagenes de 360 KB y `CALL SDFDEBUG`. Va con una
+ROM compilada del mismo commit: una ROM del firmware 0.1 no lo entiende, y
+`CALL SDFTEST` avisa si el protocolo no coincide. Para que MSX-DOS tome la fecha
+del reloj, la ROM se arma con `make rom-rtc` en vez de `make rom`.
+
 ## Grabarlo
 
 Por ICSP, con el cable de RESET del paso 1 de `../hardware/rev1/CORRECCIONES.md`.

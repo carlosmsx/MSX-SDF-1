@@ -238,6 +238,13 @@
 #define DSKIO_ERR_NOT_READY         2 //drive sin imagen, o la imagen ya no esta
 #define DSKIO_ERR_RECORD_NOT_FOUND  8 //sector fuera de la imagen
 #define DSKIO_ERR_WRITE_FAULT      10 //escritura con DPB de 720 KB en una imagen de 360
+#define DSKIO_PENDING            0xFF //todavia no se abrio la imagen: la abre loop()
+
+// /WAIT diferido: lo que la ISR le deja a loop() cuando un acceso necesita la
+// SD. La ISR vuelve sin soltar /WAIT; loop() hace el trabajo, pone el byte en
+// el bus y lo suelta (serviceDeferred). Ver sd-fuera-de-la-isr.md.
+#define DEFER_NONE                  0
+#define DEFER_DSKIO_OPEN            1 //abrir la imagen y contestar el estado de DSKIO
 
 // EEPROM: las imagenes montadas en A y B, para que sobrevivan al apagado.
 #define EEPROM_MAGIC_ADDR         0

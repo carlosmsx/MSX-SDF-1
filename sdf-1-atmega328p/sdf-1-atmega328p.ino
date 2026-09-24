@@ -88,6 +88,11 @@ volatile bool _new_request = false;
 volatile bool _sd_busy = false;
 volatile uint8_t _fmt_media; //respuesta de CMD_DSKFMT
 
+// Acceso que la ISR dejo con /WAIT puesto para que lo termine loop(), o
+// DEFER_NONE. Mientras este levantado el MSX esta congelado: no llega otro
+// acceso, asi que loop() tiene la SD para el solo.
+volatile uint8_t _deferred = DEFER_NONE;
+
 // La ISR puede usar la SD: ya esta inicializada y loop() no la esta usando.
 inline bool sdReady()
 {
@@ -1227,35 +1232,14 @@ inline void processData(register uint8_t data)
           //}
           
 
-          //antes de los sectores el MSX lee un byte de estado, ver dataToSend
+          //antes de los sectores el MSX lee un byte de estado, ver dataToSend.
+          //Abrir la imagen es SD: no va aca sino en loop() (dskioOpen), cuando
+          //el MSX pida ese byte y quede esperando en /WAIT.
           _cmd_st = CMD_ST__IO_STATUS;
           if (!sdReady() || diskFile(_drive_number)[0] == 0)
-          {
             _io_status = DSKIO_ERR_NOT_READY; //sin SD (o ocupada), o drive sin imagen montada
-            break;
-          }
-
-          if ( _cmd == CMD_READ )
-            dsk = SD.open(diskFile(_drive_number), O_READ); //abro imagen para lectura
           else
-            dsk = SD.open(diskFile(_drive_number), O_RDWR); //abro imagen para lectura+escritura
-
-          if (!dsk)
-            _io_status = DSKIO_ERR_NOT_READY;        //la imagen ya no esta en la SD
-          else if (_sector_pos + _total > dsk.fileSize())
-            _io_status = DSKIO_ERR_RECORD_NOT_FOUND; //no dejo que la imagen crezca
-          else if (_cmd == CMD_WRITE && _media == DSK_720K_MEDIA && dsk.fileSize() != DSK_720K_SIZE)
-            _io_status = DSKIO_ERR_WRITE_FAULT;      //DPB de 720 KB sobre una imagen de 360:
-                                                     //con una ROM que no elige el DPB por la
-                                                     //FAT, escribir corromperia la imagen
-          else
-          {
-            _io_status = 0;
-            dsk.seek(_sector_pos);
-          }
-          if (_io_status)
-            dsk.close();
-          //Serial.println(dsk.name());
+            _io_status = DSKIO_PENDING;
           break;
         case CMD_ST__WRITING_SEC:
           //write byte to SD
@@ -1285,6 +1269,46 @@ inline void processData(register uint8_t data)
       }
       break;
   }
+}
+
+// Abre la imagen de un DSKIO, ubica el primer sector y deja en _io_status el
+// byte de estado. Es SD, asi que corre en loop() (serviceDeferred) con el MSX
+// esperando en /WAIT, y no en la ISR.
+void dskioOpen()
+{
+  if ( _cmd == CMD_READ )
+    dsk = SD.open(diskFile(_drive_number), O_READ); //abro imagen para lectura
+  else
+    dsk = SD.open(diskFile(_drive_number), O_RDWR); //abro imagen para lectura+escritura
+
+  if (!dsk)
+    _io_status = DSKIO_ERR_NOT_READY;        //la imagen ya no esta en la SD
+  else if (_sector_pos + _total > dsk.fileSize())
+    _io_status = DSKIO_ERR_RECORD_NOT_FOUND; //no dejo que la imagen crezca
+  else if (_cmd == CMD_WRITE && _media == DSK_720K_MEDIA && dsk.fileSize() != DSK_720K_SIZE)
+    _io_status = DSKIO_ERR_WRITE_FAULT;      //DPB de 720 KB sobre una imagen de 360:
+                                             //con una ROM que no elige el DPB por la
+                                             //FAT, escribir corromperia la imagen
+  else
+  {
+    _io_status = 0;
+    dsk.seek(_sector_pos);
+  }
+  if (_io_status)
+    dsk.close();
+}
+
+// El byte de estado de DSKIO, ya con la imagen abierta o descartada: deja la
+// maquina lista para los sectores, o termina el comando si hubo error.
+inline uint8_t dskioStatus()
+{
+  if (_io_status)
+    _cmd = 0;                      //error: el MSX no manda ni pide sectores
+  else if ( _cmd == CMD_READ )
+    _cmd_st = CMD_ST__READING_SEC;
+  else
+    _cmd_st = CMD_ST__WRITING_SEC;
+  return _io_status;
 }
 
 inline uint8_t dataToSend()
@@ -1398,13 +1422,12 @@ inline uint8_t dataToSend()
     case CMD_READ:
       if ( _cmd_st == CMD_ST__IO_STATUS )
       {
-        if (_io_status)
-          _cmd = 0;                      //error: el MSX no manda ni pide sectores
-        else if ( _cmd == CMD_READ )
-          _cmd_st = CMD_ST__READING_SEC;
-        else
-          _cmd_st = CMD_ST__WRITING_SEC;
-        return _io_status;
+        if (_io_status == DSKIO_PENDING)
+        {
+          _deferred = DEFER_DSKIO_OPEN; //el estado lo contesta loop()
+          return 0;
+        }
+        return dskioStatus();
       }
       if ( _cmd_st == CMD_ST__READING_SEC )
       {
@@ -1485,6 +1508,8 @@ ISR(PCINT1_vect)
       //MSX lee un byte
       configDataBusAsOutput();
       writeDataBusByte(dataToSend());
+      if (_deferred)
+        return; //sin soltar /WAIT: el byte lo pone loop(), ver serviceDeferred
     }
     else
     {
@@ -1508,6 +1533,32 @@ ISR(PCINT1_vect)
     }
   }
   PORTC &= ~MSX_EN_MASK; //suelto WAIT
+}
+
+// Termina desde loop() la lectura que la ISR dejo con /WAIT puesto: pone el
+// byte en el bus y suelta /WAIT, igual que el final de la ISR. _deferred se
+// baja antes, porque apenas se suelta /WAIT puede entrar el acceso siguiente y
+// la ISR no lo tiene que ver levantado.
+void replyDeferred(uint8_t b)
+{
+  _deferred = DEFER_NONE;
+  configDataBusAsOutput();
+  writeDataBusByte(b);
+  PORTC &= ~MSX_EN_MASK; //suelto WAIT
+}
+
+// Atiende lo que la ISR dejo pendiente. Va primero en loop() y entre los pasos
+// de las tareas largas: mientras tanto el MSX esta en /WAIT, sin refresco de
+// la DRAM.
+void serviceDeferred()
+{
+  switch (_deferred)
+  {
+    case DEFER_DSKIO_OPEN:
+      dskioOpen();
+      replyDeferred(dskioStatus());
+      break;
+  }
 }
 
 /*
@@ -1580,6 +1631,9 @@ void setup() {
   
 void loop()
 {
+  // Primero lo que dejo la ISR: el MSX esta esperando.
+  serviceDeferred();
+
   // Mientras no haya SD, reintento. La ISR ya atiende al MSX: a los comandos
   // que necesitan la SD les contesta que no esta, y SDFTEST muestra por que.
   if (!_sd_ok)
@@ -1618,7 +1672,10 @@ void loop()
     EEPROM.update(EEPROM_MAGIC_ADDR, EEPROM_MAGIC);
     for (uint8_t d = 0; d < 2; d++)
       for (uint8_t i = 0; i < DSK_NAME_LEN; i++)
+      {
         EEPROM.update(EEPROM_MOUNTED_ADDR + d * DSK_NAME_LEN + i, copy[d][i]);
+        serviceDeferred(); //hasta 26 bytes de ~3,4 ms: no hacer esperar al MSX
+      }
   }
 
   /*

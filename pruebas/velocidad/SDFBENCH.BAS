@@ -3,6 +3,7 @@
 30 REM Mide con RTC: porque TIME no cuenta mientras se accede al disco
 40 REM Agrega a RESULT.TXT: etiqueta,KB/s escritura,KB/s lectura,ms por GET,errores,reloj
 50 H=PEEK(&HFC4A)+256*PEEK(&HFC4B):IF H<&HD820 THEN PRINT"HIMEM muy bajo: ";HEX$(H):END
+55 POKE &HD81E,H-256*INT(H/256):POKE &HD81F,INT(H/256):REM HIMEM original, lo repone la linea 950
 60 CLEAR 300,&H9800:MAXFILES=2
 70 DEFINT A,D,E,F,I,M,N:DEF FNR(X)=INT(X*10+.5)/10
 80 F=60:IF PEEK(&H2B) AND 128 THEN F=50
@@ -37,7 +38,7 @@
 370 OPEN"RESULT.TXT" FOR APPEND AS #1
 380 PRINT #1,L$;",";FNR(N*16/TW);",";FNR(N*16/TR);",";FNR(TG*1000/M);",";E;",";C$
 390 CLOSE #1:PRINT:PRINT"Guardado en RESULT.TXT"
-400 END
+400 GOTO 950
 700 REM Arranque: espera el cambio de segundo, T0 = segundo del dia
 710 IF C$="TIME" THEN TIME=0:RETURN ELSE GOSUB 850:T0=S:RETURN
 750 REM Fin: T = segundos desde el arranque. TIME mide solo la espera final, sin disco
@@ -48,9 +49,11 @@
 850 REM Espera a que cambie el segundo; deja en TIME lo que espero
 860 TIME=0:GOSUB 800:S0=S
 870 GOSUB 800:IF S<>S0 THEN RETURN
-880 IF TIME>3*F THEN PRINT:PRINT"El reloj no avanza":END
+880 IF TIME>3*F THEN PRINT:PRINT"El reloj no avanza":GOTO 950
 890 GOTO 870
 900 IF ERL=190 THEN C$="TIME":RESUME 200
 910 IF ERR=53 AND ERL=370 THEN OPEN"RESULT.TXT" FOR OUTPUT AS #1:RESUME 380
-920 ON ERROR GOTO 0:PRINT"Error";ERR;"en linea";ERL:END
+920 ON ERROR GOTO 0:PRINT"Error";ERR;"en linea";ERL:GOTO 950
+930 REM Con la pila en la pagina 2 se cuelgan los CALL SDF que usan la pagina 2 de la ROM
+950 CLEAR 200,PEEK(&HD81E)+256*PEEK(&HD81F):END
 

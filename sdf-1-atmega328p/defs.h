@@ -265,6 +265,16 @@
 #define DEFER_DBG_STATS             2 //armar las estadisticas de CALL SDFDEBUG
 #define DEFER_RAW_READ              3 //bloque directo: esperar el token, o terminar la lectura
 #define DEFER_RAW_WRITE             4 //bloque directo: esperar la SD, cerrar el bloque o terminar
+#define DEFER_FILES_NEXT            5 //CALL SDFFILES: buscar el proximo .DSK en la raiz
+#define DEFER_MOUNT                 6 //CALL SDFMOUNT: validar la imagen y montarla
+#define DEFER_FORMAT                7 //DSKFMT: el media que corresponde al largo de la imagen
+#define DEFER_SD_READ               8 //DSKIO por SdFat: primer byte de un sector, o el ultimo
+#define DEFER_SD_WRITE              9 //DSKIO por SdFat: primer o ultimo byte de un sector
+
+// Resultados que todavia no se calcularon: los calcula loop() cuando el MSX los
+// lee. Ninguno choca con un valor real (errores de BASIC < 100; media F8/F9 o 0).
+#define MOUNT_PENDING            0xFF
+#define FMT_PENDING              0xFF
 
 // Escritura directa a la SD (CMD25), sin SdFat. Apagada: un error ahi escribe
 // sectores de la SD que no son de la imagen, y puede daniar otros archivos o la

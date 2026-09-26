@@ -57,7 +57,7 @@ volatile bool _raw_first;           //el primer bloque de una lectura: no hay CR
 volatile bool _raw_err;             //algo fallo: se sigue con basura hasta el final
 volatile uint8_t _raw_sec;          //sectores que faltan, contando el actual
 volatile uint16_t _raw_idx;         //byte dentro del sector, 0..511
-volatile uint8_t _raw_byte;         //el byte que dejo la ISR en una escritura diferida
+volatile uint8_t _raw_byte;         //el byte que dejo la ISR en una escritura diferida (directa o por SdFat)
 
 // La imagen del DSKIO en curso: _img[drive] o dsk.
 File *_io = &dsk;
@@ -100,6 +100,7 @@ volatile uint8_t _mount_drive, _mount_len, _mount_idx, _mount_result;
 volatile uint8_t _io_status;
 char _list_name[DSK_NAME_LEN];
 volatile uint8_t _list_idx;
+volatile bool _list_rewind; //CALL SDFFILES empieza: rebobinar la raiz antes de buscar
 volatile uint8_t _test_idx;
 char _test_msg[TEST_MSG_MAX + 1]; //lo arma buildTestMsg, lo manda CMD_SDFTEST
 
@@ -203,8 +204,9 @@ void loadMounted()
   }
 }
 
-// Cierra CMD_SDFMOUNT: valida el pedido y deja en _mount_result 0 o el numero
-// de error de BASIC. La imagen montada se guarda por su nombre corto.
+// Cierra CMD_SDFMOUNT, en la ISR: valida lo que no necesita la SD. Si esta todo
+// bien deja _mount_result en MOUNT_PENDING, y el resto lo hace mountFinish()
+// en loop() cuando el MSX lea el resultado.
 void mountDisk()
 {
   _cmd_st = CMD_SDFMOUNT__RESULT;
@@ -225,7 +227,14 @@ void mountDisk()
     return;
   }
   _mount_name[_mount_len] = 0;
+  _mount_result = MOUNT_PENDING;
+}
 
+// DEFER_MOUNT, en loop(): verifica la imagen en la SD y deja en _mount_result 0
+// o el numero de error de BASIC. La imagen montada se guarda por su nombre
+// corto.
+void mountFinish()
+{
   _mount_result = checkDskImage(_mount_name);
   if (_mount_result == 0)
   {
@@ -503,11 +512,21 @@ void createNewDisk()
 // Contesta CMD_DSKFMT: el media del formato que le corresponde a la imagen del
 // drive por su largo, o 0 si no hay imagen. La ROM formatea con eso, y el
 // proximo DSKCHG de ese drive le avisa al DOS que la relea.
-uint8_t formatMedia(uint8_t drive)
+//
+// En la ISR, formatRequest() descarta lo que no necesita la SD; el largo lo
+// mira formatMedia() en loop() (DEFER_FORMAT), cuando el MSX lee el media.
+volatile uint8_t _fmt_drive;
+
+uint8_t formatRequest(uint8_t drive)
 {
   if (drive > NEW_DRIVE || !sdReady() || diskFile(drive)[0] == 0)
     return 0;
+  _fmt_drive = drive;
+  return FMT_PENDING;
+}
 
+uint8_t formatMedia(uint8_t drive)
+{
   uint32_t size = 0;
   File f = SD.open(diskFile(drive), O_READ);
   if (f)
@@ -1085,9 +1104,8 @@ inline void processCommand(register uint8_t command)
       break;
     case CMD_SDFFILES:
       //Serial.println("CMD_SDFFILES");
-      if (sdReady())
-        dir.rewindDirectory();
-      _list_idx = 0xff; //la primera lectura busca el primer nombre
+      _list_rewind = true; //lo rebobina loop(), con el primer nombre
+      _list_idx = 0xff;    //la primera lectura busca el primer nombre
       break;
     case CMD_SDFUMOUNT:
       //Serial.println("CMD_SDFUMOUNT");
@@ -1151,6 +1169,60 @@ inline void processCommand(register uint8_t command)
       break;
     //default:
       //Serial.println("UNKNOWN COMMAND "+String(hexByte(_cmd)));
+  }
+}
+
+// ---- DSKIO por SdFat (imagen fragmentada, NEW_DRIVE, o escritura) ------
+//
+// Un byte por acceso del MSX. En el medio de un sector SdFat solo lee o
+// escribe su cache, sin tocar la SD: eso corre en la ISR. El primer byte de
+// cada sector (trae el bloque, y en escritura graba el anterior) y el ultimo
+// (flush, o cerrar la imagen al terminar) van diferidos a loop().
+
+uint8_t sdReadByte()
+{
+#if DSK_STATS
+  uint16_t t0 = TCNT1;
+  uint8_t b = _io->read();
+  uint16_t dt = TCNT1 - t0;
+  _st.read_t += dt;
+  if (dt > ST_SLOW_TICKS)
+  {
+    _st.blk++;
+    _st.blk_t += dt;
+  }
+#else
+  uint8_t b = _io->read();
+#endif
+  _checksum = _checksum ^ b;
+  _total--;
+  if (_total == 0)
+  {
+    _cmd = 0;
+    ST_TIME(_st.close_t, dskioEnd());
+  }
+  if (++_idx_sec == 512)
+  {
+    _idx_sec = 0;
+    _checksum = 0;
+  }
+  return b;
+}
+
+void sdWriteByte(uint8_t data)
+{
+  ST_TIME(_st.write_t, _io->write(data));
+  _total--;
+  if (_total == 0)
+  {
+    _cmd = 0;
+    _cmd_st = 0;
+    ST_TIME(_st.close_t, dskioEnd());
+  }
+  if (++_idx_sec == 512)
+  {
+    _idx_sec = 0;
+    ST_TIME(_st.flush_t, _io->flush());
   }
 }
 
@@ -1328,7 +1400,7 @@ inline void processData(register uint8_t data)
     case CMD_DSKFMT:
       if ( _cmd_st == CMD_DSKFMT__DRIVE )
       {
-        _fmt_media = formatMedia(data);
+        _fmt_media = formatRequest(data);
         _cmd_st = CMD_DSKFMT__MEDIA;
       }
       break;
@@ -1402,29 +1474,14 @@ inline void processData(register uint8_t data)
             _io_status = DSKIO_PENDING;
           break;
         case CMD_ST__WRITING_SEC:
-          //write byte to SD
-          ST_TIME(_st.write_t, _io->write(data));
-          //Serial.print(hexByte(data));
-          _total--;
-          //if (_total % 32 == 0)
-          //  Serial.println();
-          
-          if (_total == 0)
+          //el primero y el ultimo de cada sector tocan la SD: los hace loop()
+          if (_idx_sec == 0 || _idx_sec == 511)
           {
-            _cmd = 0;
-            _cmd_st = 0;
-            ST_TIME(_st.close_t, dskioEnd());
+            _raw_byte = data;
+            _deferred = DEFER_SD_WRITE;
           }
-          
-          _idx_sec++;
-          if ( _idx_sec == 512 )
-          {
-            _idx_sec = 0;
-            //Serial.println("CHECKSUM=...TODO");
-            //_checksum = 0;
-            //_cmd_st = CMD_ST__READ_CRC;
-            ST_TIME(_st.flush_t, _io->flush());
-          }
+          else
+            sdWriteByte(data);
           break;
       }
       break;
@@ -1744,12 +1801,13 @@ inline uint8_t dataToSend()
       //un byte por lectura: los nombres como ASCIIZ y un nombre vacio al final
       if ( _list_idx == 0xff )
       {
-        if (!sdReady() || !nextDskName()) //sin SD (o ocupada), la lista vacia
+        if (!sdReady()) //sin SD (o ocupada), la lista vacia
         {
           _cmd = 0;
           return 0;
         }
-        _list_idx = 0;
+        _deferred = DEFER_FILES_NEXT; //recorrer el directorio es SD: filesNext
+        return 0;
       }
       if ( _list_name[_list_idx] == 0 )
         _list_idx = 0xff; //mando el 0 y la proxima lectura busca otro nombre
@@ -1759,6 +1817,11 @@ inline uint8_t dataToSend()
     case CMD_SDFMOUNT:
       if ( _cmd_st == CMD_SDFMOUNT__RESULT )
       {
+        if (_mount_result == MOUNT_PENDING)
+        {
+          _deferred = DEFER_MOUNT; //lo verifica loop(): mountFinish
+          return 0;
+        }
         _cmd = 0;
         return _mount_result;
       }
@@ -1782,6 +1845,11 @@ inline uint8_t dataToSend()
     case CMD_DSKFMT:
       if ( _cmd_st == CMD_DSKFMT__MEDIA )
       {
+        if (_fmt_media == FMT_PENDING)
+        {
+          _deferred = DEFER_FORMAT; //lo mira loop(): formatMedia
+          return 0;
+        }
         _cmd = 0;
         return _fmt_media;
       }
@@ -1811,41 +1879,14 @@ inline uint8_t dataToSend()
       }
       if ( _cmd_st == CMD_ST__READING_SEC )
       {
-        //read byte from SD
-#if DSK_STATS
-        uint16_t t0 = TCNT1;
-        uint8_t b = _io->read();
-        uint16_t dt = TCNT1 - t0;
-        _st.read_t += dt;
-        if (dt > ST_SLOW_TICKS)
+        //el primero de cada sector trae el bloque de la SD, y el ultimo de
+        //todos puede cerrar la imagen: los hace loop()
+        if (_idx_sec == 0 || _total == 1)
         {
-          _st.blk++;
-          _st.blk_t += dt;
+          _deferred = DEFER_SD_READ;
+          return 0;
         }
-#else
-        uint8_t b = _io->read();
-#endif
-        _checksum = _checksum ^ b;
-        //Serial.print(hexByte(b));
-        _total--;
-        //if (_total % 32 == 0)
-        //  Serial.println();
-        
-        if (_total == 0)
-        {
-          _cmd = 0;
-          ST_TIME(_st.close_t, dskioEnd());
-        }
-        
-        _idx_sec++;
-        if ( _idx_sec == 512 )
-        {
-          _idx_sec = 0;
-          //Serial.println("CHECKSUM="+hexByte(_checksum));
-          _checksum = 0;
-          //_cmd_st = CMD_ST__READ_CRC;
-        }
-        return b;
+        return sdReadByte();
       }
       //else if ( _cmd_st == CMD_ST__READ_CRC )
       //{
@@ -1966,6 +2007,38 @@ void serviceDeferred()
       break;
     case DEFER_RAW_WRITE:
       rawWriteDeferred();
+      break;
+    case DEFER_SD_READ:
+      replyDeferred(sdReadByte());
+      break;
+    case DEFER_SD_WRITE:
+      sdWriteByte(_raw_byte);
+      releaseDeferred();
+      break;
+    case DEFER_FILES_NEXT:
+      if (_list_rewind)
+      {
+        _list_rewind = false;
+        dir.rewindDirectory();
+      }
+      if (nextDskName())
+      {
+        _list_idx = 0;
+        replyDeferred(dataToSend()); //primera letra del nombre
+      }
+      else
+      {
+        _cmd = 0;                    //no hay mas: el nombre vacio del final
+        replyDeferred(0);
+      }
+      break;
+    case DEFER_MOUNT:
+      mountFinish();
+      replyDeferred(dataToSend());   //ya no es MOUNT_PENDING: contesta el resultado
+      break;
+    case DEFER_FORMAT:
+      _fmt_media = formatMedia(_fmt_drive);
+      replyDeferred(dataToSend());   //el media, y termina el comando
       break;
     case DEFER_DSKIO_OPEN:
     {

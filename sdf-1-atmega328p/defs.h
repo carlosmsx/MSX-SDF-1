@@ -62,9 +62,16 @@
 // Tienen que coincidir con los EQU de diskrom/PROTOCOL.INC, que incluyen las
 // dos paginas de la ROM.
 
-// Version del firmware, la muestra CALL SDFTEST. La fecha de compilacion
-// distingue dos grabaciones de la misma version.
+// Version del firmware, la muestra CALL SDFTEST. Compilado con "make firmware"
+// sale de git: ultimo tag, commits desde el tag y commit, con un * si habia
+// cambios sin commitear ("0.2-7-2f2b606*"); lo pasa el Makefile en FW_GIT.
+// Compilado desde el IDE no hay git: queda la version a mano y la fecha.
+// La fecha y hora exactas de compilacion las muestra CALL SDFDEBUG al arrancar.
+#ifdef FW_GIT
+#define FW_VERSION        FW_GIT
+#else
 #define FW_VERSION        "0.2 " __DATE__
+#endif
 
 // CALL SDFDEBUG imprime lo que el firmware haya dejado con dbg() y lo vacia.
 // Son 64 bytes de RAM: si hacen falta para otra cosa, bajarlo.

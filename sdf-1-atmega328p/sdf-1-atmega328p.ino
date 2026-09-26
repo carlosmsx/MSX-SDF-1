@@ -248,6 +248,15 @@ void dbg(const char *s)
   _dbg_msg[_dbg_len] = 0;
 }
 
+// dbg() con el texto en la flash: dbgP(PSTR("...")) no gasta RAM.
+void dbgP(PGM_P s)
+{
+  char c;
+  while ((c = pgm_read_byte(s++)) && _dbg_len < DEBUG_MSG_MAX - 1)
+    _dbg_msg[_dbg_len++] = c;
+  _dbg_msg[_dbg_len] = 0;
+}
+
 void dbgHex(uint8_t b)
 {
   static const char hex[] = "0123456789ABCDEF";
@@ -1614,7 +1623,7 @@ void setup() {
   // PORTC, que es el mismo puerto del que la ISR maneja el /WAIT.
   twiInit();
 
-  dbg("sdf-1 arranco\r\n");  //ejemplo de dbg(): borralo cuando pongas los tuyos
+  dbgP(PSTR("sdf-1 " FW_VERSION "\r\n" __DATE__ " " __TIME__ "\r\n")); //lo muestra CALL SDFDEBUG
 
   digitalWrite(MSX_EN_PIN, LOW); //deshabilito el decoder
 

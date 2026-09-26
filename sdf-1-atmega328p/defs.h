@@ -62,13 +62,28 @@
 // Tienen que coincidir con los EQU de diskrom/PROTOCOL.INC, que incluyen las
 // dos paginas de la ROM.
 
-// Version del firmware, la muestra CALL SDFTEST. La fecha de compilacion
-// distingue dos grabaciones de la misma version.
-#define FW_VERSION        "0.2 " __DATE__
+// Version del firmware, la muestra CALL SDFTEST. Compilado con "make firmware"
+// sale de git: ultimo tag, commits desde el tag y commit, con un * si habia
+// cambios sin commitear ("0.2-7-2f2b606*"); lo pasa el Makefile en FW_GIT.
+// Compilado desde el IDE no hay git: queda la version a mano y la fecha.
+// La fecha y hora exactas de compilacion las muestra CALL SDFDEBUG al arrancar.
+#ifdef FW_GIT
+#define FW_VERSION        FW_GIT
+#else
+#define FW_VERSION        "0.3 " __DATE__
+#endif
 
 // CALL SDFDEBUG imprime lo que el firmware haya dejado con dbg() y lo vacia.
-// Son 64 bytes de RAM: si hacen falta para otra cosa, bajarlo.
-#define DEBUG_MSG_MAX     64
+// Son 128 bytes de RAM: si hacen falta para otra cosa, bajarlo. Con DSK_STATS
+// el informe llega a ~120; sin ellas alcanza con 64.
+#define DEBUG_MSG_MAX     128
+
+// Estadisticas del disco: cuantas llamadas a DSKIO hubo y en que se fue el
+// tiempo (abrir la imagen, leer y escribir en la SD, flush, cerrar), medido
+// con Timer1. CALL SDFDEBUG las muestra y las pone en cero. Cuestan ~35
+// ciclos por byte en la ISR (~2 % de la velocidad): 0 las saca del todo.
+#define DSK_STATS         1
+#define ST_SLOW_TICKS     60  //una lectura de mas de ~190 us trajo un bloque de la SD
 
 // CALL SDFTEST muestra la version y, en otra linea, el estado de la SD. La
 // ROM lee a lo sumo 32 caracteres: si no entran, el sketch no compila.
@@ -139,7 +154,9 @@
 #define CMD_ST__READING_SEC       10
 #define CMD_ST__READ_CRC          11
 #define CMD_ST__IO_STATUS         12
+#define CMD_ST__RAW_READ          13  //imagen contigua: bytes directo de la SD por SPI
 #define CMD_ST__WRITING_SEC       20
+#define CMD_ST__RAW_WRITE         21  //imagen contigua: bytes directo a la SD por SPI
 #define CMD_SDFMOUNT__DRIVE       30
 #define CMD_SDFMOUNT__LENGTH      31
 #define CMD_SDFMOUNT__NAME        32
@@ -238,6 +255,41 @@
 #define DSKIO_ERR_NOT_READY         2 //drive sin imagen, o la imagen ya no esta
 #define DSKIO_ERR_RECORD_NOT_FOUND  8 //sector fuera de la imagen
 #define DSKIO_ERR_WRITE_FAULT      10 //escritura con DPB de 720 KB en una imagen de 360
+#define DSKIO_PENDING            0xFF //todavia no se abrio la imagen: la abre loop()
+
+// /WAIT diferido: lo que la ISR le deja a loop() cuando un acceso necesita la
+// SD. La ISR vuelve sin soltar /WAIT; loop() hace el trabajo, pone el byte en
+// el bus y lo suelta (serviceDeferred). Ver sd-fuera-de-la-isr.md.
+#define DEFER_NONE                  0
+#define DEFER_DSKIO_OPEN            1 //abrir la imagen y contestar el estado de DSKIO
+#define DEFER_DBG_STATS             2 //armar las estadisticas de CALL SDFDEBUG
+#define DEFER_RAW_READ              3 //bloque directo: esperar el token, o terminar la lectura
+#define DEFER_RAW_WRITE             4 //bloque directo: esperar la SD, cerrar el bloque o terminar
+#define DEFER_FILES_NEXT            5 //CALL SDFFILES: buscar el proximo .DSK en la raiz
+#define DEFER_MOUNT                 6 //CALL SDFMOUNT: validar la imagen y montarla
+#define DEFER_FORMAT                7 //DSKFMT: el media que corresponde al largo de la imagen
+#define DEFER_SD_READ               8 //DSKIO por SdFat: primer byte de un sector, o el ultimo
+#define DEFER_SD_WRITE              9 //DSKIO por SdFat: primer o ultimo byte de un sector
+
+// Resultados que todavia no se calcularon: los calcula loop() cuando el MSX los
+// lee. Ninguno choca con un valor real (errores de BASIC < 100; media F8/F9 o 0).
+#define MOUNT_PENDING            0xFF
+#define FMT_PENDING              0xFF
+
+// Escritura directa a la SD (CMD25), sin SdFat. Apagada: un error ahi escribe
+// sectores de la SD que no son de la imagen, y puede daniar otros archivos o la
+// FAT de la tarjeta. La lectura directa si va siempre: leer no dania nada. Para
+// probarla, 1, y con una SD sin nada que importe. Aun prendida, una escritura
+// que no cae entera dentro de los sectores de la imagen va por SdFat.
+#define RAW_WRITE                 0
+
+// Transferencia directa entre la SD y el Z80 (imagenes contiguas): esperas
+// maximas de loop(), en ms. Pasado el tiempo el DSKIO sigue con basura y
+// SDFDEBUG avisa: no hay forma de devolverle un error al DOS a mitad de camino.
+#define RAW_TOKEN_MS              300 //la SD empieza a mandar un bloque
+#define RAW_BUSY_MS               600 //la SD termina de grabar un bloque
+#define SD_TOKEN_DATA            0xFE //empieza un bloque, en lectura y en CMD24
+#define SD_TOKEN_MULTI_WRITE     0xFC //empieza un bloque de CMD25
 
 // EEPROM: las imagenes montadas en A y B, para que sobrevivan al apagado.
 #define EEPROM_MAGIC_ADDR         0

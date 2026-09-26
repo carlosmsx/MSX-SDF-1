@@ -9,6 +9,11 @@ Makefile        text eol=lf
 *.sh            text eol=lf
 *.py            text eol=lf
 
+# --- Cosas que TIENEN que ser CRLF --------------------------------
+# BASIC en ASCII para cargar en el MSX con LOAD: el MSX espera CR LF.
+*.BAS           text eol=crlf
+*.bas           text eol=crlf
+
 # Intel HEX: lo lee avrdude, no una persona. Fijado para que el archivo
 # publicado sea byte a byte el mismo en cualquier maquina.
 *.hex           text eol=lf

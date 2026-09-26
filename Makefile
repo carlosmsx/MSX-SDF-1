@@ -249,10 +249,23 @@ ACLI = "$(ARDUINO_CLI)"
 # chequeo de que existe: la ruta tiene espacios y $(wildcard) no la maneja.
 ACLI_VERSION = $(shell $(ACLI) version)
 
+# Version desde git, para CALL SDFTEST: "v0.2-7-g2f2b606*" queda en
+# "0.2-7-2f2b606*" (tag, commits desde el tag, commit, * si hay cambios sin
+# commitear). Sin git, FW_GIT queda vacia y defs.h usa la version a mano.
+# El largo importa: la ROM lee 32 caracteres, y con "\r\nSD no contesta"
+# quedan 16 para la version (lo controla un static_assert del sketch).
+FW_GIT := $(subst -g,-,$(patsubst v%,%,$(shell git describe --tags --long --dirty=*)))
+FW_DEFINE := $(if $(FW_GIT),--build-property "compiler.cpp.extra_flags=-DFW_GIT=\"$(FW_GIT)\"")
+
 firmware: $(FW_HEX)
 
-$(FW_HEX): $(SKETCH)/$(SKETCH).ino $(SKETCH)/defs.h
-	$(ACLI) compile -b "$(FQBN)" --output-dir $(FW_OUT) ./$(SKETCH)
+# FORCE: se compila siempre, porque la version cambia con cada commit aunque
+# el .ino y el defs.h no cambien. arduino-cli solo recompila lo necesario.
+$(FW_HEX): $(SKETCH)/$(SKETCH).ino $(SKETCH)/defs.h FORCE
+	$(ACLI) compile -b "$(FQBN)" $(FW_DEFINE) --output-dir $(FW_OUT) ./$(SKETCH)
+	$(info version $(if $(FW_GIT),$(FW_GIT),sin git: la de defs.h))
+
+FORCE:
 
 check-firmware:
 	$(if $(ACLI_VERSION),,$(error falta arduino-cli en '$(ARDUINO_CLI)'))

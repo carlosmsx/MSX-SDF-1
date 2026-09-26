@@ -74,8 +74,16 @@
 #endif
 
 // CALL SDFDEBUG imprime lo que el firmware haya dejado con dbg() y lo vacia.
-// Son 64 bytes de RAM: si hacen falta para otra cosa, bajarlo.
-#define DEBUG_MSG_MAX     64
+// Son 128 bytes de RAM: si hacen falta para otra cosa, bajarlo. Con DSK_STATS
+// el informe llega a ~120; sin ellas alcanza con 64.
+#define DEBUG_MSG_MAX     128
+
+// Estadisticas del disco: cuantas llamadas a DSKIO hubo y en que se fue el
+// tiempo (abrir la imagen, leer y escribir en la SD, flush, cerrar), medido
+// con Timer1. CALL SDFDEBUG las muestra y las pone en cero. Cuestan ~35
+// ciclos por byte en la ISR (~2 % de la velocidad): 0 las saca del todo.
+#define DSK_STATS         1
+#define ST_SLOW_TICKS     60  //una lectura de mas de ~190 us trajo un bloque de la SD
 
 // CALL SDFTEST muestra la version y, en otra linea, el estado de la SD. La
 // ROM lee a lo sumo 32 caracteres: si no entran, el sketch no compila.
@@ -252,6 +260,7 @@
 // el bus y lo suelta (serviceDeferred). Ver sd-fuera-de-la-isr.md.
 #define DEFER_NONE                  0
 #define DEFER_DSKIO_OPEN            1 //abrir la imagen y contestar el estado de DSKIO
+#define DEFER_DBG_STATS             2 //armar las estadisticas de CALL SDFDEBUG
 
 // EEPROM: las imagenes montadas en A y B, para que sobrevivan al apagado.
 #define EEPROM_MAGIC_ADDR         0

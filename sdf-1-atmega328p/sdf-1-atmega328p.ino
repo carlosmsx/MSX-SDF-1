@@ -257,6 +257,62 @@ void dbgP(PGM_P s)
   _dbg_msg[_dbg_len] = 0;
 }
 
+#if DSK_STATS
+// Estadisticas del disco (ver DSK_STATS en defs.h). Los tiempos van en ticks
+// de Timer1, que corre libre con prescaler 64: 3,2 us por tick. Cada medicion
+// es de 16 bits, asi que un intervalo de mas de 210 ms se lee mal.
+struct DskStats {
+  uint16_t rd, wr, sec;   //llamadas a DSKIO de lectura y escritura, sectores pedidos
+  uint16_t blk;           //lecturas lentas: las que trajeron un bloque de la SD
+  uint16_t open_max;
+  uint32_t open_t;        //dskioOpen: SD.open, fileSize y seek
+  uint32_t read_t;        //todas las dsk.read() de la ISR, blk_t incluido
+  uint32_t blk_t;
+  uint32_t write_t;       //dsk.write() de la ISR
+  uint32_t flush_t;       //dsk.flush() de cada sector escrito
+  uint32_t close_t;       //dsk.close() al terminar cada DSKIO
+};
+volatile DskStats _st;
+volatile bool _st_report = false; //CALL SDFDEBUG pidio el informe
+
+#define ST_TIME(acc, stmt) do { uint16_t _t0 = TCNT1; stmt; (acc) += (uint16_t)(TCNT1 - _t0); } while (0)
+
+uint32_t ticksToMs(uint32_t t)
+{
+  return (t * 16 + 2500) / 5000;  //3,2 us por tick
+}
+
+void dbgNum(uint32_t n)
+{
+  char s[11];
+  dbg(ultoa(n, s, 10));
+}
+
+// Agrega el informe al buffer de CALL SDFDEBUG y pone todo en cero. Corre en
+// loop() (serviceDeferred): son divisiones de 32 bits, no van en la ISR.
+void statsReport()
+{
+  if (_st.rd || _st.wr)
+  {
+    dbgP(PSTR("DSKIO L"));     dbgNum(_st.rd);
+    dbgP(PSTR(" E"));          dbgNum(_st.wr);
+    dbgP(PSTR(" sec"));        dbgNum(_st.sec);
+    dbgP(PSTR("\r\nabrir "));  dbgNum(ticksToMs(_st.open_t));
+    dbgP(PSTR("ms max"));      dbgNum(ticksToMs(_st.open_max));
+    dbgP(PSTR("\r\nleer "));   dbgNum(ticksToMs(_st.read_t));
+    dbgP(PSTR("ms blq"));      dbgNum(_st.blk);
+    dbgP(PSTR(" "));           dbgNum(ticksToMs(_st.blk_t));
+    dbgP(PSTR("ms\r\nescr ")); dbgNum(ticksToMs(_st.write_t));
+    dbgP(PSTR("ms flush"));    dbgNum(ticksToMs(_st.flush_t));
+    dbgP(PSTR("ms\r\ncerrar ")); dbgNum(ticksToMs(_st.close_t));
+    dbgP(PSTR("ms\r\n"));
+  }
+  memset((void *)&_st, 0, sizeof(_st));
+}
+#else
+#define ST_TIME(acc, stmt) do { stmt; } while (0)
+#endif
+
 void dbgHex(uint8_t b)
 {
   static const char hex[] = "0123456789ABCDEF";
@@ -939,6 +995,9 @@ inline void processCommand(register uint8_t command)
       break;
     case CMD_SDFDEBUG:
       _dbg_idx = 0;
+#if DSK_STATS
+      _st_report = true; //el informe lo arma loop() en la primera lectura
+#endif
       break;
     case CMD_SDFTEST:
       //Serial.println("CMD_SDFTEST");
@@ -1252,7 +1311,7 @@ inline void processData(register uint8_t data)
           break;
         case CMD_ST__WRITING_SEC:
           //write byte to SD
-          dsk.write(data);
+          ST_TIME(_st.write_t, dsk.write(data));
           //Serial.print(hexByte(data));
           _total--;
           //if (_total % 32 == 0)
@@ -1262,7 +1321,7 @@ inline void processData(register uint8_t data)
           {
             _cmd = 0;
             _cmd_st = 0;
-            dsk.close();
+            ST_TIME(_st.close_t, dsk.close());
           }
           
           _idx_sec++;
@@ -1272,7 +1331,7 @@ inline void processData(register uint8_t data)
             //Serial.println("CHECKSUM=...TODO");
             //_checksum = 0;
             //_cmd_st = CMD_ST__READ_CRC;
-            dsk.flush();
+            ST_TIME(_st.flush_t, dsk.flush());
           }
           break;
       }
@@ -1302,6 +1361,13 @@ void dskioOpen()
   {
     _io_status = 0;
     dsk.seek(_sector_pos);
+#if DSK_STATS
+    if (_cmd == CMD_READ)
+      _st.rd++;
+    else
+      _st.wr++;
+    _st.sec += _n_sectors;
+#endif
   }
   if (_io_status)
     dsk.close();
@@ -1349,6 +1415,13 @@ inline uint8_t dataToSend()
       }
       return _test_msg[_test_idx++];
     case CMD_SDFDEBUG:
+#if DSK_STATS
+      if (_st_report)
+      {
+        _deferred = DEFER_DBG_STATS; //loop() agrega las estadisticas
+        return 0;
+      }
+#endif
       //un byte por lectura hasta el 0; al terminar el buffer queda vacio
       if (_dbg_idx < _dbg_len)
         return _dbg_msg[_dbg_idx++];
@@ -1441,7 +1514,19 @@ inline uint8_t dataToSend()
       if ( _cmd_st == CMD_ST__READING_SEC )
       {
         //read byte from SD
+#if DSK_STATS
+        uint16_t t0 = TCNT1;
         uint8_t b = dsk.read();
+        uint16_t dt = TCNT1 - t0;
+        _st.read_t += dt;
+        if (dt > ST_SLOW_TICKS)
+        {
+          _st.blk++;
+          _st.blk_t += dt;
+        }
+#else
+        uint8_t b = dsk.read();
+#endif
         _checksum = _checksum ^ b;
         //Serial.print(hexByte(b));
         _total--;
@@ -1451,7 +1536,7 @@ inline uint8_t dataToSend()
         if (_total == 0)
         {
           _cmd = 0;
-          dsk.close();
+          ST_TIME(_st.close_t, dsk.close());
         }
         
         _idx_sec++;
@@ -1564,9 +1649,27 @@ void serviceDeferred()
   switch (_deferred)
   {
     case DEFER_DSKIO_OPEN:
+    {
+#if DSK_STATS
+      uint16_t t0 = TCNT1;
       dskioOpen();
+      uint16_t dt = TCNT1 - t0;
+      _st.open_t += dt;
+      if (dt > _st.open_max)
+        _st.open_max = dt;
+#else
+      dskioOpen();
+#endif
       replyDeferred(dskioStatus());
       break;
+    }
+#if DSK_STATS
+    case DEFER_DBG_STATS:
+      _st_report = false;
+      statsReport();
+      replyDeferred(dataToSend()); //ahora si, el primer caracter del buffer
+      break;
+#endif
   }
 }
 
@@ -1622,6 +1725,13 @@ void setup() {
   // habilitar el PCINT: twiInit() hace lectura-modificacion-escritura sobre
   // PORTC, que es el mismo puerto del que la ISR maneja el /WAIT.
   twiInit();
+
+#if DSK_STATS
+  // Timer1 libre, sin interrupciones, como reloj de las estadisticas: prescaler
+  // 64, 3,2 us por tick. En el perfil DSK Timer1 no lo usa nadie mas.
+  TCCR1A = 0;
+  TCCR1B = _BV(CS11) | _BV(CS10);
+#endif
 
   dbgP(PSTR("sdf-1 " FW_VERSION "\r\n" __DATE__ " " __TIME__ "\r\n")); //lo muestra CALL SDFDEBUG
 

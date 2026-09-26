@@ -49,6 +49,7 @@ volatile uint8_t _img_stale[2] = { 0, 0 };
 // por SPI. Lo que tarda (esperar el token, que la SD termine de grabar, parar
 // la transferencia) va diferido a loop(), al principio y al final de cada bloque.
 Sector_t _lba[2] = { 0, 0 };
+Sector_t _lba_end[2];               //ultimo sector de la imagen: nada directo pasa de ahi
 volatile bool _raw = false;         //transferencia directa en curso, la SD es suya
 volatile bool _raw_abort = false;   //llego otro comando en medio: loop() la para
 volatile bool _raw_rd;              //es una lectura (CMD18), si no una escritura (CMD25)
@@ -1567,8 +1568,16 @@ bool rawStart(uint8_t d)
 {
   if (d > 1 || _lba[d] == 0 || _n_sectors == 0)
     return false;
-  SD.cacheClear(); //graba lo pendiente y olvida la cache: la imagen cambia por debajo
+#if !RAW_WRITE
+  if (_cmd == CMD_WRITE)
+    return false; //la escritura directa esta apagada, ver RAW_WRITE en defs.h
+#endif
+  // Red de seguridad, aparte del chequeo de fileSize() de dskioOpen(): todo el
+  // pedido tiene que caer dentro de los sectores de la imagen, o va por SdFat.
   Sector_t s = _lba[d] + _sector;
+  if (s < _lba[d] || s + _n_sectors - 1 > _lba_end[d])
+    return false;
+  SD.cacheClear(); //graba lo pendiente y olvida la cache: la imagen cambia por debajo
   bool ok = _cmd == CMD_READ ? SD.card()->readStart(s) : SD.card()->writeStart(s);
   if (!ok)
     return false;
@@ -1600,8 +1609,7 @@ void dskioOpen()
       _img[d] = SD.open(diskFile(d), O_RDWR);
       if (!_img[d])
         _img[d] = SD.open(diskFile(d), O_READ); //de solo lectura en la SD: se lee igual
-      Sector_t end;
-      if (!_img[d] || !_img[d].contiguousRange(&_lba[d], &end))
+      if (!_img[d] || !_img[d].contiguousRange(&_lba[d], &_lba_end[d]))
         _lba[d] = 0; //fragmentada: va por SdFat
     }
     _io = &_img[d];

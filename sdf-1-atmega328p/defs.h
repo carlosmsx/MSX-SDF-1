@@ -266,6 +266,13 @@
 #define DEFER_RAW_READ              3 //bloque directo: esperar el token, o terminar la lectura
 #define DEFER_RAW_WRITE             4 //bloque directo: esperar la SD, cerrar el bloque o terminar
 
+// Escritura directa a la SD (CMD25), sin SdFat. Apagada: un error ahi escribe
+// sectores de la SD que no son de la imagen, y puede daniar otros archivos o la
+// FAT de la tarjeta. La lectura directa si va siempre: leer no dania nada. Para
+// probarla, 1, y con una SD sin nada que importe. Aun prendida, una escritura
+// que no cae entera dentro de los sectores de la imagen va por SdFat.
+#define RAW_WRITE                 0
+
 // Transferencia directa entre la SD y el Z80 (imagenes contiguas): esperas
 // maximas de loop(), en ms. Pasado el tiempo el DSKIO sigue con basura y
 // SDFDEBUG avisa: no hay forma de devolverle un error al DOS a mitad de camino.

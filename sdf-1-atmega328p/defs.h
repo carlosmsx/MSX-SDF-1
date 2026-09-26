@@ -70,7 +70,7 @@
 #ifdef FW_GIT
 #define FW_VERSION        FW_GIT
 #else
-#define FW_VERSION        "0.2 " __DATE__
+#define FW_VERSION        "0.3 " __DATE__
 #endif
 
 // CALL SDFDEBUG imprime lo que el firmware haya dejado con dbg() y lo vacia.

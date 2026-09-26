@@ -34,7 +34,25 @@
 
 SdFat SD;
 char curFile[14];
-File dsk;
+File dsk;       //imagen de un DSKIO que no esta abierta en _img: NEW_DRIVE
+
+// Las imagenes de A y B quedan abiertas entre un DSKIO y otro: abrirlas
+// busca el nombre en la raiz de la SD, ~19 ms por llamada. Las abre
+// dskioOpen() la primera vez que hacen falta. Cuando CALL SDFMOUNT/SDFUMOUNT
+// cambian un drive, la ISR solo levanta _img_stale y la cierra loop().
+File _img[2];
+volatile uint8_t _img_stale[2] = { 0, 0 };
+
+// La imagen del DSKIO en curso: _img[drive] o dsk.
+File *_io = &dsk;
+
+// Fin de un DSKIO: cierra la imagen solo si no es de las que quedan abiertas.
+// Lo escrito en A y B ya quedo en la SD con el flush() de cada sector.
+inline void dskioEnd()
+{
+  if (_io == &dsk)
+    dsk.close();
+}
 File dir;
 volatile bool _debug = false;
 volatile uint8_t _stat=0;
@@ -196,6 +214,7 @@ void mountDisk()
   if (_mount_result == 0)
   {
     strcpy(_mounted[_mount_drive], _mount_name);
+    _img_stale[_mount_drive] = 1;   //la imagen abierta es la anterior
     _dsk_changed[_mount_drive] = 1; //el proximo DSKCHG de ese drive avisa al DOS
     _save_mounted = true;           //la EEPROM la graba loop(), no la ISR
   }
@@ -219,6 +238,7 @@ void umountDisk(uint8_t drive)
     return;
   }
   _mounted[drive][0] = 0;
+  _img_stale[drive] = 1;   //la cierra loop()
   _dsk_changed[drive] = 1; //el DOS descarta lo que tenga en buffers de ese drive
   _save_mounted = true;
   _mount_result = 0;
@@ -270,7 +290,7 @@ struct DskStats {
   uint32_t blk_t;
   uint32_t write_t;       //dsk.write() de la ISR
   uint32_t flush_t;       //dsk.flush() de cada sector escrito
-  uint32_t close_t;       //dsk.close() al terminar cada DSKIO
+  uint32_t close_t;       //dskioEnd(): cerrar NEW_DRIVE al terminar cada DSKIO
 };
 volatile DskStats _st;
 volatile bool _st_report = false; //CALL SDFDEBUG pidio el informe
@@ -288,25 +308,53 @@ void dbgNum(uint32_t n)
   dbg(ultoa(n, s, 10));
 }
 
+// Marca de agua de la pila: al arrancar se pinta la RAM libre (entre el fin de
+// las variables y la pila) y el informe cuenta cuanto quedo sin tocar. Es lo
+// minimo que sobro desde el arranque, con todo lo que se haya anidado.
+#define STACK_PAINT 0xAA
+extern uint8_t __bss_end;
+
+void stackPaint()
+{
+  uint8_t *p = &__bss_end;
+  uint8_t *sp = (uint8_t *)SP;
+  while (p < sp - 16) //no piso lo que esta usando esta misma llamada
+    *p++ = STACK_PAINT;
+}
+
+uint16_t stackFree()
+{
+  uint8_t *p = &__bss_end;
+  while (*p == STACK_PAINT && p < (uint8_t *)RAMEND)
+    p++;
+  return p - &__bss_end;
+}
+
 // Agrega el informe al buffer de CALL SDFDEBUG y pone todo en cero. Corre en
 // loop() (serviceDeferred): son divisiones de 32 bits, no van en la ISR.
+//   DSKIO L<lecturas> E<escrituras> sec<sectores> pila<bytes que nunca se usaron>
+//   abrir <ms> max<ms>
+//   leer <ms> blq<bloques traidos de la SD> <ms>
+//   escr <ms> flush<ms> cerr<ms>
 void statsReport()
 {
+  dbgP(PSTR("DSKIO L"));      dbgNum(_st.rd);
+  dbgP(PSTR(" E"));           dbgNum(_st.wr);
+  dbgP(PSTR(" sec"));         dbgNum(_st.sec);
+  dbgP(PSTR(" pila"));        dbgNum(stackFree());
   if (_st.rd || _st.wr)
   {
-    dbgP(PSTR("DSKIO L"));     dbgNum(_st.rd);
-    dbgP(PSTR(" E"));          dbgNum(_st.wr);
-    dbgP(PSTR(" sec"));        dbgNum(_st.sec);
-    dbgP(PSTR("\r\nabrir "));  dbgNum(ticksToMs(_st.open_t));
-    dbgP(PSTR("ms max"));      dbgNum(ticksToMs(_st.open_max));
-    dbgP(PSTR("\r\nleer "));   dbgNum(ticksToMs(_st.read_t));
-    dbgP(PSTR("ms blq"));      dbgNum(_st.blk);
-    dbgP(PSTR(" "));           dbgNum(ticksToMs(_st.blk_t));
+    dbgP(PSTR("\r\nabrir ")); dbgNum(ticksToMs(_st.open_t));
+    dbgP(PSTR("ms max"));     dbgNum(ticksToMs(_st.open_max));
+    dbgP(PSTR("\r\nleer "));  dbgNum(ticksToMs(_st.read_t));
+    dbgP(PSTR("ms blq"));     dbgNum(_st.blk);
+    dbgP(PSTR(" "));          dbgNum(ticksToMs(_st.blk_t));
     dbgP(PSTR("ms\r\nescr ")); dbgNum(ticksToMs(_st.write_t));
-    dbgP(PSTR("ms flush"));    dbgNum(ticksToMs(_st.flush_t));
-    dbgP(PSTR("ms\r\ncerrar ")); dbgNum(ticksToMs(_st.close_t));
-    dbgP(PSTR("ms\r\n"));
+    dbgP(PSTR(" flush"));     dbgNum(ticksToMs(_st.flush_t));
+    dbgP(PSTR(" cerr"));      dbgNum(ticksToMs(_st.close_t));
+    dbgP(PSTR("ms"));
   }
+  dbgP(PSTR("\r\n"));
   memset((void *)&_st, 0, sizeof(_st));
 }
 #else
@@ -1311,7 +1359,7 @@ inline void processData(register uint8_t data)
           break;
         case CMD_ST__WRITING_SEC:
           //write byte to SD
-          ST_TIME(_st.write_t, dsk.write(data));
+          ST_TIME(_st.write_t, _io->write(data));
           //Serial.print(hexByte(data));
           _total--;
           //if (_total % 32 == 0)
@@ -1321,7 +1369,7 @@ inline void processData(register uint8_t data)
           {
             _cmd = 0;
             _cmd_st = 0;
-            ST_TIME(_st.close_t, dsk.close());
+            ST_TIME(_st.close_t, dskioEnd());
           }
           
           _idx_sec++;
@@ -1331,7 +1379,7 @@ inline void processData(register uint8_t data)
             //Serial.println("CHECKSUM=...TODO");
             //_checksum = 0;
             //_cmd_st = CMD_ST__READ_CRC;
-            ST_TIME(_st.flush_t, dsk.flush());
+            ST_TIME(_st.flush_t, _io->flush());
           }
           break;
       }
@@ -1344,23 +1392,45 @@ inline void processData(register uint8_t data)
 // esperando en /WAIT, y no en la ISR.
 void dskioOpen()
 {
-  if ( _cmd == CMD_READ )
-    dsk = SD.open(diskFile(_drive_number), O_READ); //abro imagen para lectura
+  uint8_t d = _drive_number;
+  if (d < 2)
+  {
+    //A y B: la imagen queda abierta de un DSKIO al siguiente
+    if (_img_stale[d])
+    {
+      _img_stale[d] = 0;
+      _img[d].close();
+    }
+    if (!_img[d])
+    {
+      _img[d] = SD.open(diskFile(d), O_RDWR);
+      if (!_img[d])
+        _img[d] = SD.open(diskFile(d), O_READ); //de solo lectura en la SD: se lee igual
+    }
+    _io = &_img[d];
+  }
   else
-    dsk = SD.open(diskFile(_drive_number), O_RDWR); //abro imagen para lectura+escritura
+  {
+    //NEW_DRIVE: se abre y se cierra en cada DSKIO, como antes
+    dsk = SD.open(diskFile(d), _cmd == CMD_READ ? O_READ : O_RDWR);
+    _io = &dsk;
+  }
 
-  if (!dsk)
+  File &f = *_io;
+  if (!f)
     _io_status = DSKIO_ERR_NOT_READY;        //la imagen ya no esta en la SD
-  else if (_sector_pos + _total > dsk.fileSize())
+  else if (_cmd == CMD_WRITE && !f.isWritable())
+    _io_status = DSKIO_ERR_NOT_READY;        //la abri de solo lectura
+  else if (_sector_pos + _total > f.fileSize())
     _io_status = DSKIO_ERR_RECORD_NOT_FOUND; //no dejo que la imagen crezca
-  else if (_cmd == CMD_WRITE && _media == DSK_720K_MEDIA && dsk.fileSize() != DSK_720K_SIZE)
+  else if (_cmd == CMD_WRITE && _media == DSK_720K_MEDIA && f.fileSize() != DSK_720K_SIZE)
     _io_status = DSKIO_ERR_WRITE_FAULT;      //DPB de 720 KB sobre una imagen de 360:
                                              //con una ROM que no elige el DPB por la
                                              //FAT, escribir corromperia la imagen
   else
   {
     _io_status = 0;
-    dsk.seek(_sector_pos);
+    f.seek(_sector_pos);
 #if DSK_STATS
     if (_cmd == CMD_READ)
       _st.rd++;
@@ -1370,7 +1440,7 @@ void dskioOpen()
 #endif
   }
   if (_io_status)
-    dsk.close();
+    dskioEnd();
 }
 
 // El byte de estado de DSKIO, ya con la imagen abierta o descartada: deja la
@@ -1516,7 +1586,7 @@ inline uint8_t dataToSend()
         //read byte from SD
 #if DSK_STATS
         uint16_t t0 = TCNT1;
-        uint8_t b = dsk.read();
+        uint8_t b = _io->read();
         uint16_t dt = TCNT1 - t0;
         _st.read_t += dt;
         if (dt > ST_SLOW_TICKS)
@@ -1525,7 +1595,7 @@ inline uint8_t dataToSend()
           _st.blk_t += dt;
         }
 #else
-        uint8_t b = dsk.read();
+        uint8_t b = _io->read();
 #endif
         _checksum = _checksum ^ b;
         //Serial.print(hexByte(b));
@@ -1536,7 +1606,7 @@ inline uint8_t dataToSend()
         if (_total == 0)
         {
           _cmd = 0;
-          ST_TIME(_st.close_t, dsk.close());
+          ST_TIME(_st.close_t, dskioEnd());
         }
         
         _idx_sec++;
@@ -1703,6 +1773,9 @@ void findDsk()
 */
 
 void setup() {
+#if DSK_STATS
+  stackPaint(); //lo primero: todavia no se uso nada de la pila
+#endif
   pinMode(BOTON1, INPUT_PULLUP);
   pinMode(BOTON2, INPUT_PULLUP);
   pinMode(MSX_CS_PIN, INPUT);

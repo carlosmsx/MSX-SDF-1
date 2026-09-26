@@ -154,7 +154,9 @@
 #define CMD_ST__READING_SEC       10
 #define CMD_ST__READ_CRC          11
 #define CMD_ST__IO_STATUS         12
+#define CMD_ST__RAW_READ          13  //imagen contigua: bytes directo de la SD por SPI
 #define CMD_ST__WRITING_SEC       20
+#define CMD_ST__RAW_WRITE         21  //imagen contigua: bytes directo a la SD por SPI
 #define CMD_SDFMOUNT__DRIVE       30
 #define CMD_SDFMOUNT__LENGTH      31
 #define CMD_SDFMOUNT__NAME        32
@@ -261,6 +263,16 @@
 #define DEFER_NONE                  0
 #define DEFER_DSKIO_OPEN            1 //abrir la imagen y contestar el estado de DSKIO
 #define DEFER_DBG_STATS             2 //armar las estadisticas de CALL SDFDEBUG
+#define DEFER_RAW_READ              3 //bloque directo: esperar el token, o terminar la lectura
+#define DEFER_RAW_WRITE             4 //bloque directo: esperar la SD, cerrar el bloque o terminar
+
+// Transferencia directa entre la SD y el Z80 (imagenes contiguas): esperas
+// maximas de loop(), en ms. Pasado el tiempo el DSKIO sigue con basura y
+// SDFDEBUG avisa: no hay forma de devolverle un error al DOS a mitad de camino.
+#define RAW_TOKEN_MS              300 //la SD empieza a mandar un bloque
+#define RAW_BUSY_MS               600 //la SD termina de grabar un bloque
+#define SD_TOKEN_DATA            0xFE //empieza un bloque, en lectura y en CMD24
+#define SD_TOKEN_MULTI_WRITE     0xFC //empieza un bloque de CMD25
 
 // EEPROM: las imagenes montadas en A y B, para que sobrevivan al apagado.
 #define EEPROM_MAGIC_ADDR         0

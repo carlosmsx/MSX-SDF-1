@@ -43,6 +43,21 @@ File dsk;       //imagen de un DSKIO que no esta abierta en _img: NEW_DRIVE
 File _img[2];
 volatile uint8_t _img_stale[2] = { 0, 0 };
 
+// Primer sector absoluto en la SD de cada imagen abierta, si esta en sectores
+// contiguos, o 0. Con eso un DSKIO no pasa por SdFat: loop() arranca una
+// lectura o escritura de varios bloques (CMD18/CMD25) y la ISR pasa cada byte
+// por SPI. Lo que tarda (esperar el token, que la SD termine de grabar, parar
+// la transferencia) va diferido a loop(), al principio y al final de cada bloque.
+Sector_t _lba[2] = { 0, 0 };
+volatile bool _raw = false;         //transferencia directa en curso, la SD es suya
+volatile bool _raw_abort = false;   //llego otro comando en medio: loop() la para
+volatile bool _raw_rd;              //es una lectura (CMD18), si no una escritura (CMD25)
+volatile bool _raw_first;           //el primer bloque de una lectura: no hay CRC antes
+volatile bool _raw_err;             //algo fallo: se sigue con basura hasta el final
+volatile uint8_t _raw_sec;          //sectores que faltan, contando el actual
+volatile uint16_t _raw_idx;         //byte dentro del sector, 0..511
+volatile uint8_t _raw_byte;         //el byte que dejo la ISR en una escritura diferida
+
 // La imagen del DSKIO en curso: _img[drive] o dsk.
 File *_io = &dsk;
 
@@ -114,7 +129,7 @@ volatile uint8_t _deferred = DEFER_NONE;
 // La ISR puede usar la SD: ya esta inicializada y loop() no la esta usando.
 inline bool sdReady()
 {
-  return _sd_ok && !_sd_busy;
+  return _sd_ok && !_sd_busy && !_raw;
 }
 
 const char* diskFile(uint8_t drive)
@@ -1025,6 +1040,15 @@ inline void processCommand(register uint8_t command)
     return;
   }
 
+  // Un comando en medio de una transferencia directa: el DOS la abandono. La
+  // SD la para loop(); aca solo se corta la maquina de estados, para que los
+  // bytes del comando nuevo no vayan a parar al SPI.
+  if (_raw)
+  {
+    _raw_abort = true;
+    _cmd_st = 0;
+  }
+
   _cmd = command;
 
   //resincronizo datos a recibir
@@ -1137,7 +1161,24 @@ inline void processData(register uint8_t data)
     _debug = false;
     return;
   }
-  
+
+  // Escritura directa a la SD: el camino de cada byte. El primero y el ultimo
+  // de cada sector los hace loop() (token, esperar la SD, CRC y respuesta).
+  if (_cmd_st == CMD_ST__RAW_WRITE)
+  {
+    if (_raw_idx == 0 || _raw_idx == 511)
+    {
+      _raw_byte = data;
+      _deferred = DEFER_RAW_WRITE;
+      return;
+    }
+    SPDR = data;
+    while (!(SPSR & _BV(SPIF)))
+      ;
+    _raw_idx++;
+    return;
+  }
+
   switch (_cmd)
   {
     // 0xAx: reloj del kernel. CMD_RTCSETDA=anio-1980,mes,dia (3 bytes);
@@ -1352,7 +1393,9 @@ inline void processData(register uint8_t data)
           //Abrir la imagen es SD: no va aca sino en loop() (dskioOpen), cuando
           //el MSX pida ese byte y quede esperando en /WAIT.
           _cmd_st = CMD_ST__IO_STATUS;
-          if (!sdReady() || diskFile(_drive_number)[0] == 0)
+          //sin sdReady(): si quedo una transferencia directa cortada, loop() la
+          //para antes de abrir la imagen (serviceDeferred)
+          if (!_sd_ok || _sd_busy || diskFile(_drive_number)[0] == 0)
             _io_status = DSKIO_ERR_NOT_READY; //sin SD (o ocupada), o drive sin imagen montada
           else
             _io_status = DSKIO_PENDING;
@@ -1387,6 +1430,157 @@ inline void processData(register uint8_t data)
   }
 }
 
+// ---- Transferencia directa entre la SD y el Z80 ------------------------
+//
+// Todo esto corre en loop(), con el MSX en /WAIT. readStart()/writeStart() de
+// SdFat mandan CMD18/CMD25 y dejan la SD seleccionada; lo que va entre bloques
+// lo hace el firmware con el SPI a mano, igual que readData()/writeData() de
+// SdFat pero de a un byte por acceso del MSX.
+
+inline uint8_t spiXfer(uint8_t x)
+{
+  SPDR = x;
+  while (!(SPSR & _BV(SPIF)))
+    ;
+  return SPDR;
+}
+
+// Espera el token de inicio de bloque. false si no llega o no es el esperado.
+bool rawWaitToken()
+{
+  uint16_t t0 = millis();
+  do
+  {
+    uint8_t t = spiXfer(0xFF);
+    if (t != 0xFF)
+      return t == SD_TOKEN_DATA;
+  } while ((uint16_t)(millis() - t0) < RAW_TOKEN_MS);
+  return false;
+}
+
+// Espera a que la SD termine de grabar el bloque anterior (MISO en alto).
+bool rawWaitReady()
+{
+  uint16_t t0 = millis();
+  while (spiXfer(0xFF) != 0xFF)
+    if ((uint16_t)(millis() - t0) >= RAW_BUSY_MS)
+      return false;
+  return true;
+}
+
+// Para la transferencia en la SD. No toca _cmd: puede llamarse porque llego
+// otro comando, que ya es el que manda.
+void rawStop()
+{
+  bool ok = _raw_rd ? SD.card()->readStop() : SD.card()->writeStop();
+  if (!ok || _raw_err)
+    dbgP(PSTR("SD: fallo una transferencia directa\r\n"));
+  _raw = false;
+  _raw_abort = false;
+}
+
+// Fin normal de un DSKIO directo: para la SD y termina el comando.
+void rawEnd()
+{
+  rawStop();
+  _cmd = 0;
+  _cmd_st = 0;
+}
+
+// DEFER_RAW_READ: el primer byte de un sector (antes, el CRC del sector
+// anterior y el token) o el ultimo de toda la lectura (despues, CRC y CMD12).
+void rawReadDeferred()
+{
+  if (_raw_idx == 0)
+  {
+    if (!_raw_first)
+    {
+      spiXfer(0xFF); //CRC del sector anterior, no se verifica (USE_SD_CRC 0)
+      spiXfer(0xFF);
+    }
+    _raw_first = false;
+#if DSK_STATS
+    _st.blk++;
+    ST_TIME(_st.blk_t, if (!rawWaitToken()) _raw_err = true);
+#else
+    if (!rawWaitToken())
+      _raw_err = true;
+#endif
+  }
+  uint8_t b = spiXfer(0xFF);
+  if (++_raw_idx == 512)
+  {
+    _raw_idx = 0;
+    if (--_raw_sec == 0)
+    {
+      spiXfer(0xFF); //CRC del ultimo sector
+      spiXfer(0xFF);
+      rawEnd();
+    }
+  }
+  replyDeferred(b);
+}
+
+// DEFER_RAW_WRITE: el primer byte de un sector (antes, esperar a que la SD
+// grabe el anterior y mandar el token) o el ultimo (despues, CRC y respuesta;
+// si era el ultimo sector, esperar y parar).
+void rawWriteDeferred()
+{
+  if (_raw_idx == 0)
+  {
+#if DSK_STATS
+    ST_TIME(_st.flush_t, if (!rawWaitReady()) _raw_err = true);
+#else
+    if (!rawWaitReady())
+      _raw_err = true;
+#endif
+    spiXfer(SD_TOKEN_MULTI_WRITE);
+    spiXfer(_raw_byte);
+    _raw_idx = 1;
+  }
+  else
+  {
+    spiXfer(_raw_byte);
+    spiXfer(0xFF); //CRC, que la SD no verifica
+    spiXfer(0xFF);
+    if ((spiXfer(0xFF) & 0x1F) != 0x05) //respuesta de datos: aceptado
+      _raw_err = true;
+    _raw_idx = 0;
+#if DSK_STATS
+    _st.blk++;
+#endif
+    if (--_raw_sec == 0)
+    {
+#if DSK_STATS
+      ST_TIME(_st.flush_t, rawEnd()); //writeStop espera que grabe el ultimo
+#else
+      rawEnd();
+#endif
+    }
+  }
+  releaseDeferred();
+}
+
+// Si la imagen del drive esta en sectores contiguos de la SD, arranca la
+// transferencia directa. false si no se puede: el DSKIO sigue por SdFat.
+bool rawStart(uint8_t d)
+{
+  if (d > 1 || _lba[d] == 0 || _n_sectors == 0)
+    return false;
+  SD.cacheClear(); //graba lo pendiente y olvida la cache: la imagen cambia por debajo
+  Sector_t s = _lba[d] + _sector;
+  bool ok = _cmd == CMD_READ ? SD.card()->readStart(s) : SD.card()->writeStart(s);
+  if (!ok)
+    return false;
+  _raw = true;
+  _raw_rd = _cmd == CMD_READ;
+  _raw_first = true;
+  _raw_err = false;
+  _raw_sec = _n_sectors;
+  _raw_idx = 0;
+  return true;
+}
+
 // Abre la imagen de un DSKIO, ubica el primer sector y deja en _io_status el
 // byte de estado. Es SD, asi que corre en loop() (serviceDeferred) con el MSX
 // esperando en /WAIT, y no en la ISR.
@@ -1406,6 +1600,9 @@ void dskioOpen()
       _img[d] = SD.open(diskFile(d), O_RDWR);
       if (!_img[d])
         _img[d] = SD.open(diskFile(d), O_READ); //de solo lectura en la SD: se lee igual
+      Sector_t end;
+      if (!_img[d] || !_img[d].contiguousRange(&_lba[d], &end))
+        _lba[d] = 0; //fragmentada: va por SdFat
     }
     _io = &_img[d];
   }
@@ -1430,7 +1627,8 @@ void dskioOpen()
   else
   {
     _io_status = 0;
-    f.seek(_sector_pos);
+    if (!rawStart(d))
+      f.seek(_sector_pos);
 #if DSK_STATS
     if (_cmd == CMD_READ)
       _st.rd++;
@@ -1450,14 +1648,36 @@ inline uint8_t dskioStatus()
   if (_io_status)
     _cmd = 0;                      //error: el MSX no manda ni pide sectores
   else if ( _cmd == CMD_READ )
-    _cmd_st = CMD_ST__READING_SEC;
+    _cmd_st = _raw ? CMD_ST__RAW_READ : CMD_ST__READING_SEC;
   else
-    _cmd_st = CMD_ST__WRITING_SEC;
+    _cmd_st = _raw ? CMD_ST__RAW_WRITE : CMD_ST__WRITING_SEC;
   return _io_status;
 }
 
 inline uint8_t dataToSend()
 {
+  // Lectura directa de la SD: el camino de cada byte. El primero de cada sector
+  // (token, y el CRC del anterior) y el ultimo de todos (CRC y CMD12) los hace
+  // loop().
+  if (_cmd_st == CMD_ST__RAW_READ)
+  {
+    if (_raw_idx == 0 || (_raw_sec == 1 && _raw_idx == 511))
+    {
+      _deferred = DEFER_RAW_READ;
+      return 0;
+    }
+    SPDR = 0xFF;
+    while (!(SPSR & _BV(SPIF)))
+      ;
+    uint8_t b = SPDR;
+    if (++_raw_idx == 512)
+    {
+      _raw_idx = 0;
+      _raw_sec--;
+    }
+    return b;
+  }
+
   switch(_cmd)
   {
     // 0xAx: reloj del kernel. CMD_RTCCHK: 1 byte (0FFh=hay reloj, 0=no).
@@ -1679,6 +1899,8 @@ ISR(PCINT1_vect)
     {
       //MSX envía un byte
       processData(readDataBusByte());
+      if (_deferred)
+        return; //sin soltar /WAIT: lo suelta loop(), ver serviceDeferred
     }
   }
   else
@@ -1711,13 +1933,32 @@ void replyDeferred(uint8_t b)
   PORTC &= ~MSX_EN_MASK; //suelto WAIT
 }
 
+// Lo mismo para una escritura del MSX: el byte ya lo leyo la ISR, solo falta
+// soltar /WAIT. El bus queda como entrada.
+void releaseDeferred()
+{
+  _deferred = DEFER_NONE;
+  PORTC &= ~MSX_EN_MASK; //suelto WAIT
+}
+
 // Atiende lo que la ISR dejo pendiente. Va primero en loop() y entre los pasos
 // de las tareas largas: mientras tanto el MSX esta en /WAIT, sin refresco de
 // la DRAM.
 void serviceDeferred()
 {
+  // Una transferencia directa que el DOS abandono: parar la SD antes que nada,
+  // tambien antes de un pedido del comando nuevo.
+  if (_raw_abort)
+    rawStop();
+
   switch (_deferred)
   {
+    case DEFER_RAW_READ:
+      rawReadDeferred();
+      break;
+    case DEFER_RAW_WRITE:
+      rawWriteDeferred();
+      break;
     case DEFER_DSKIO_OPEN:
     {
 #if DSK_STATS
